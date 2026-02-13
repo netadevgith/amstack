@@ -1325,8 +1325,8 @@ elseif ($request->input('poststop') !== null)
             'env.MAIL_DRIVER' => 'required',
             'env.MAIL_HOST' => 'required',
             'env.MAIL_PORT' => 'required',
-            'env.MAIL_USERNAME' => 'required',
-            'env.MAIL_PASSWORD' => 'required',
+            'env.MAIL_USERNAME' => 'nullable',
+            'env.MAIL_PASSWORD' => 'nullable',
             'env.MAIL_FROM_EMAIL' => 'required|email',
             'env.MAIL_FROM_NAME' => 'required',
         ];
@@ -1350,8 +1350,10 @@ elseif ($request->input('poststop') !== null)
                 $rules = [];
                 try {
                     $transport = \Swift_SmtpTransport::newInstance($env["MAIL_HOST"], $env["MAIL_PORT"], $env["MAIL_ENCRYPTION"]);
-                    $transport->setUsername($env["MAIL_USERNAME"]);
-                    $transport->setPassword($env["MAIL_PASSWORD"]);
+                    if (!empty($env["MAIL_USERNAME"])) {
+                        $transport->setUsername($env["MAIL_USERNAME"]);
+                        $transport->setPassword($env["MAIL_PASSWORD"]);
+                    }
                     $mailer = \Swift_Mailer::newInstance($transport);
                     $mailer->getTransport()->start();
                 } catch (\Swift_TransportException $e) {
