@@ -64,7 +64,7 @@ sed -i "s|REDIS_PORT=.*|REDIS_PORT=${REDIS_PORT}|" .env
 sed -i "s|REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASSWORD}|" .env
 
 # Update app URL for local
-sed -i "s|APP_URL=.*|APP_URL=http://localhost:8090|" .env
+sed -i "s|APP_URL=.*|APP_URL=http://localhost|" .env
 
 # Update Cloudflare settings (if provided via Docker environment)
 if [ -n "${CLOUDFLARE_ENABLED}" ]; then

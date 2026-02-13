@@ -46,7 +46,7 @@ services:
       - mariadb
       - redis
     ports:
-      - "8090:80"       # Laravel web UI
+      - "80:80"         # Laravel web UI
       - "8091:8082"     # Storage API
       - "8092:8083"     # Storage links
     volumes:
