@@ -1,0 +1,52 @@
+#!/usr/bin/php
+<?php
+// apsikakojusiam mysql paduodam:
+// SET @@wait_timeout=103333;
+// SET GLOBAL max_allowed_packet=524288000;
+
+
+$file = "test_Ok.txt";
+$portion = 1000;
+
+$DB_HOST="127.0.0.1";
+$DB_DATABASE="mailsendas_app2";
+$DB_USERNAME="app2";
+$DB_PASSWORD="bGh9CaF897q";
+$DB_PORT=3306;
+
+// Create connection
+$conn = new mysqli($DB_HOST, $DB_USERNAME, $DB_PASSWORD, $DB_DATABASE);
+// Check connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+} 
+
+$conn->query( 'SET @@global.max_allowed_packet = ' . 500 * 1024 * 1024 * 1024);
+
+$sql = "";
+
+$handle = fopen($file, "r");
+if ($handle) {
+    while (($line = fgets($handle)) !== false) {
+        // process the line read.
+$line = preg_replace( "/\r|\n/", "", $line);
+$sql .= "INSERT INTO blacklists (email,created_at,updated_at,admin_id,customer_id) VALUES('$line',now(),now(),1,1);";
+    }
+
+    fclose($handle);
+} else {
+    echo "erruoras atidarant faila\n";
+} 
+
+
+if ($conn->multi_query($sql) === TRUE) {
+    echo "New records created successfully\n";
+}
+// else {
+//    echo "Error: " . $sql . "<br>" . $conn->error;
+//}
+
+$conn->close();
+
+
+?>

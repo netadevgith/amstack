@@ -1,0 +1,17 @@
+# Archives
+*.zip
+
+# Large binaries (PowerMTA installers — exceed GitHub 100MB limit)
+extracted/acelle_esp/public_html/tools/multipmta/*.tar.gz
+
+# GeoLite2 database (64MB binary, download separately)
+extracted/storage/GeoLite2-City.mmdb
+
+# Not part of ESP
+extracted/parkagency_crm/
+
+# OS / IDE / tooling
+.DS_Store
+__MACOSX
+.claude/
+**/.idea/

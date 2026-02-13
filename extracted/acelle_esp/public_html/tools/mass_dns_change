@@ -1,0 +1,37 @@
+#!/usr/bin/php
+<?php
+$API = "http://dns.amala.ltd/api/index.php";
+$API_KEY = "LABADIENA23";
+// here we declare the records
+// jeigu naudojam kitus dns tipus negu TXT reikia ant dns manager api nuimti \" \" kur yra $_GET['ip']
+$rec_type = 'TXT';
+$rec_dns = '';
+$rec_val = "v=spf1 a ip4:185.91.118.17/28 ip4:192.187.124.82/29 ip4:69.30.249.66/29 ip4:204.12.241.146/29 ?all";
+
+
+function set_record($domain,$type,$dns,$value) {
+global $API,$API_KEY;
+if ($dns == "") $dns = $domain;
+else $dns = $dns.".".$domain;
+$url = $API . "?auth=" . $API_KEY . "&do=massupdate&domain=" . $domain."&type=".$type."&dns=".$dns."&ip=".$value;
+$data = file_get_contents($url);
+//print "DEBUG: $data\n";
+return $data;
+}
+   try {
+        $url = $API . "?auth=" . $API_KEY . "&do=list";
+        $domains = \json_decode(file_get_contents($url));
+        foreach ($domains as $domain) {
+        print "Setting records for domain $domain->name: ";
+        $json = @json_decode(set_record($domain->name,$rec_type,$rec_dns,$rec_val));
+        if (isset($json)&&isset($json->status)&&$json->status == "ok") echo "OK\n";
+        else echo "Error\n";
+//        break;
+       }
+
+        } catch (Exception $ex) {
+            return null;
+        }
+
+
+?>

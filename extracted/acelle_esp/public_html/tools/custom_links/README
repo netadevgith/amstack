@@ -1,0 +1,6 @@
+random string generators, install pwgen
+
+usage
+
+lenghth 13, count 7
+pwgen 13 7 -1

@@ -1,0 +1,18 @@
+Nauju kontaktu importas i storage
+
+isextractinam emailus i nauji_emailai.txt (email per line)
+tada padarom sortinima kad neliktu duplikatu (ignore case, only unique)
+sort -fu -o nauji_emailai_sorted.txt nauji_emailai.txt
+mv nauji_emailai_sorted.txt nauji_emailai.txt
+
+countinam skaitiklius pagal sita faila
+
+./storage --count-data-from --file nauji_emailai.txt
+
+istrinam viska is providers/
+paleidziam kad suimportuotu i sql
+
+./storage --extract-providers --file nauji_emailai.txt
+
+
+

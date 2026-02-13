@@ -1,0 +1,67 @@
+#!/usr/bin/php
+<?php
+// apsikakojusiam mysql paduodam:
+// SET @@wait_timeout=103333;
+// SET GLOBAL max_allowed_packet=524288000;
+
+
+$file = "openers_by_cmd.txt";
+//$file = "testas";
+$portion = 5000;
+$mail_list_id = 91;
+
+$DB_HOST="127.0.0.1";
+$DB_DATABASE="mailsendas_testdev";
+$DB_USERNAME="devtest";
+$DB_PASSWORD="bGh9CaF897q";
+$DB_PORT=3306;
+
+echo "Trying to import\n";
+
+// Create connection
+$conn = new mysqli($DB_HOST, $DB_USERNAME, $DB_PASSWORD, $DB_DATABASE);
+// Check connection
+if ($conn->connect_error) {
+    die("Connection failed: " . $conn->connect_error);
+} 
+
+echo "Preparing massive array...\n";
+$handle = fopen($file, "r");
+$inserts = [];
+if ($handle) {
+    while (($line = fgets($handle)) !== false) {
+        // process the line read.
+       $line = preg_replace( "/\r|\n/", "", $line);
+      if (preg_match('/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,7}/', $line))
+      {
+      $inserts[] = "(UUID_SHORT(), $mail_list_id,'$line','subscribed',now(),now(),'imported')";
+      }
+    }
+
+    fclose($handle);
+} else {
+    echo "erruoras atidarant faila\n";
+} 
+
+echo "Doing import...\n";
+$parts = ceil(count($inserts) / $portion);
+$prepared_insert = array_chunk($inserts, $portion);
+$part_count = 0;
+foreach ($prepared_insert as $part) {
+$part_count++;
+if ($conn->multi_query("INSERT IGNORE INTO subscribers (uid,mail_list_id,email,status,created_at,updated_at,subscription_type) VALUES " . implode(',', $part)) == TRUE) {
+echo "Processing insert Part: $part_count of $parts done...\n";
+} else {
+echo "Error accoured processing insert ".$conn->error;
+if ($conn->multi_query("INSERT IGNORE INTO subscribers (uid,mail_list_id,email,status,created_at,updated_at,subscription_type) VALUES " . implode(',', $part)) == TRUE) {
+echo "Retry succeded!\n";
+} else {
+echo "Retry failed!\n";
+}
+}
+}
+
+$conn->close();
+
+
+?>

@@ -1,0 +1,173 @@
+#!/usr/bin/perl -w
+# prereq: apt install libnet-openssh-perl libio-pty-perl
+# version history:
+# 2.1 - Implemented while loops when checking logs and retrie counts up to 20
+
+
+my $version = "2.1";
+use strict;
+use warnings;
+use Getopt::Long;
+use POSIX "setsid";
+use Net::OpenSSH;
+use JSON::XS;
+#$Net::OpenSSH::debug = -1;
+my $host;
+my $username = 'root';
+my $password;
+my $port = 22;
+my $uid;
+my $postfix_id;
+my %env; # variable to put laravel settings in
+
+my %opt = (
+                "help" => 0,
+        );
+
+
+# Gather the options from the command line
+GetOptions(\%opt,
+                'host=s' => \$host,
+                'user=s' => \$username,
+                'pass=s' => \$password,
+                'port=i' => \$port,
+                'uid=s'  => \$uid,
+                'help',
+        );
+
+
+my %args = (
+  user      => $username,
+  password  => $password,
+  port      => $port,
+  autodie   => 0,
+  timeout   => 10,
+  autoflush => 1,
+);
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub usage {
+        # Shown with --help option passed
+        print "\n".
+                "   check_server_deliverability $version - Checks if the email is delivered ok in the postfix\n".
+                "   Bug reports, feature requests\n".
+                "\n".
+                "   Options\n".
+                "      --host       Remote machine host\n".
+                "      --user       Remote machine ssh username\n".
+                "      --pass       Remote machine ssh password\n".
+                "      --port       Remote machine port (Default 22)\n".
+                "      --uid       Remote Postfix unique key\n".
+                "\n";
+        exit;
+}
+
+
+
+if (defined($host)&&defined($username)&&defined($password)&&defined($port)) {
+read_lavonelis();
+print "Connecting to server: $host\n";
+my $ssh;
+my $serv;
+if ($password eq "key") {
+$ssh = Net::OpenSSH->new(host=>$host, user=>$username, 
+                port=>$port, 
+                key_path => '~/.ssh/id_rsa',master_opts => [-o => "StrictHostKeyChecking=no"]);
+
+} else { 
+$ssh = Net::OpenSSH->new("$username:$password\@$host:$port",master_opts => [-o => "StrictHostKeyChecking=no"], timeout => 30);
+}
+   my $res = $ssh->error;
+   chomp $res;
+if ($ssh->error) {
+   print "Unable to connect to $host!\n";
+   my $serv->{msg} = "Unable to connect to $host error: ".$ssh->error;
+   $serv->{status} = 0;
+   my $json = encode_json($serv);
+   print "JSON: $json\n";
+   exit(12);
+   } else {
+   print "Connected\n";
+   print "Checking for delivery information...\n";
+   $serv->{hostname} = $host;
+   $serv->{username} = $username;
+   $serv->{password} = $password;
+   $serv->{port} = $port;
+   # some hack to wait for the uid the it shows up :)
+#   my $wait = $ssh->capture({stdin_data => "( tail -f -n0 /var/log/mail.log & ) |grep -q '$uid'\n"});
+   print "First time check for key accourance...\n";   
+   my $cnter = 0;
+   OUTER:
+   while (1) {
+   my $debug = $ssh->pipe_out("tail -n5000 /var/log/mail.log|grep '$uid'");
+        while(<$debug>) {
+              if ($_ =~ /^(?<date>.*) (?<hostname>\w+) (?<instance>.*)\/(?<procname>cleanup|smtp)\[(?<procid>\d+)\]: (?<mailuid>\w+): warning: header $env{GOSENDER_TRACKTAG}: (?<campaign>\w+) \[(?<deployment>\w+)\] from.*$/) {
+              $postfix_id = $6;
+              last OUTER;
+              }
+        }
+        sleep(1);
+        $cnter++;
+        last OUTER if ($cnter > 20);
+   }
+# another wait for the key to show up
+#my $wait2 = $ssh->capture({stdin_data => "( tail -f -n0 /var/log/mail.log & ) |grep -q '$postfix_id'\n"}) if ($postfix_id ne "");
+#   my $wait2 = $ssh->pipe_out("( tail -f -n0 /var/log/mail.log & ) |grep -q '$uid'");
+if (defined($postfix_id) && $postfix_id ne "") {
+   chomp($postfix_id);
+print "Key $postfix_id detected, now checking second time and detecting the postfix key...\n";
+   my $cnter2 = 0;
+   UTER:
+   while (1) {
+   my $debug2 = $ssh->pipe_out("tail -n5000 /var/log/mail.log");
+     while(<$debug2>) {
+# galima meginti escapinti ir su \Q ir su \E vistiek tas pats sudas tik su \Q isvis neveikia nors turetu... :(
+              if ($_ =~ /^.* (?<instance>.+)\/.*: $postfix_id: to=<(?<email>[^>]+)>, relay=(?<relay>[^,]+)?.*status=(?<status>\w+) \((?<status_msg>.*?)\)$/gs) {
+              my $status = $4;
+              my $status_msg = $5;
+              if ($status eq "sent") {
+	              $serv->{status} = 1;
+              } else {
+        	      $serv->{status} = 0;
+              }
+              $serv->{msg} = $status_msg;
+              $serv->{respond} = $_;
+              my $json = encode_json($serv);
+              print "We detected the delivery info in the log: $status_msg\n";
+              print "JSON: $json\n";
+              exit(0);
+          }
+        }
+   sleep(1);
+   $cnter2++;
+   last UTER if ($cnter2 > 20);
+   } # while true end
+}
+
+$serv->{msg} = "No delivery information was found on the server";
+$serv->{respond} = "Maybe server are blocking the incomming port 2525 connections or maybe there are some more serious issue";
+$serv->{status} = 0;
+my $json = encode_json($serv); 
+print "JSON: $json\n";
+exit(13);
+
+}
+} else {
+if (defined $opt{'help'} && $opt{'help'} == 1) { usage(); }
+print "You must provide the correct parameters for this application\n";
+exit(15);
+}

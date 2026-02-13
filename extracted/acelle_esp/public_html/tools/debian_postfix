@@ -1,0 +1,146 @@
+#!/usr/bin/perl -w
+# implementing postfix standards
+# prereq: apt install libnet-openssh-perl libio-pty-perl libmojolicious-perl libfile-slurp-perl
+
+my $debug = 0;
+my $force_install = 0;
+use warnings;
+use strict;
+use POSIX "setsid";
+use Net::OpenSSH;
+use Data::Dumper;
+use POSIX ":sys_wait_h";
+use Time::HiRes qw(sleep);
+use Socket;
+use Time::localtime;
+use Mojo::UserAgent;
+use File::Basename;
+my $scriptdir = undef;
+$scriptdir = dirname($0);
+my $ua  = Mojo::UserAgent->new;
+Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+my $mta_api = 'http://mta.parkagency.org/api.php';
+
+sub inject_text {
+my ($destination,$text) = @_;
+
+}
+
+sub server_to_api {
+my ($host,$sshport,$sshusername,$sshpassword,$smtpport) = @_;
+#$ua->post($mta_api.'?addserver&post=1' => {Accept => '*/*'} => form => { 'type' => 'postfix', 'host' => $host, 'sshport' => $sshport, 'sshusername' => $sshusername, 'sshpassword' => $sshpassword, 'smtpport' => $smtpport });
+}
+
+sub enable_root {
+my ($ip,$hostname,$username,$password) = @_;
+print "Enabling root account on server: $ip\n";
+my $port = 22;
+my $ssh;
+if ($password eq "key") {
+$ssh = Net::OpenSSH->new(host=>$ip, user=>$username,
+                port=>$port,
+                key_path => '~/.ssh/id_rsa',master_opts => [-o => "StrictHostKeyChecking=no"]);
+
+} else {
+$ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => "StrictHostKeyChecking=no"], timeout => 30);
+}
+my $out = $ssh->system("sudo cp -r ~/.ssh /root/;".
+                       "sudo sed  -i -re \"s/#PermitRootLogin prohibit-password/PermitRootLogin prohibit-password/g\" /etc/ssh/sshd_config;".
+                       "sudo service ssh restart");
+}
+
+
+sub new_postfix {
+my ($ip,$hostname,$username,$password) = @_;
+print "Setting up server: $ip\n";
+my $port = 22;
+my $ssh;
+if ($password eq "key") {
+$ssh = Net::OpenSSH->new(host=>$ip, user=>$username,
+                port=>$port,
+                key_path => '~/.ssh/id_rsa',master_opts => [-o => "StrictHostKeyChecking=no"]);
+
+} else {
+$ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => "StrictHostKeyChecking=no"], timeout => 30);
+}
+
+    my $res = $ssh->error;
+    chomp $res;
+    if ($res eq '0') {
+    if ($ssh->test(ps => -C => "master") && $force_install == 0) {
+        print "postfix is running on $ip machine, nothing to do..\n";
+        # update sql records to preapared = 1
+      }
+      else {
+# upload fix
+my $optz={recursive => 1, glob => 1, timeout => 1000, quiet => 0,stderr_to_stdout => 1};
+$ssh->scp_put($optz, $scriptdir."/minisvc","/usr/local/bin/minisvc");
+$ssh->scp_put($optz, $scriptdir."/minisvc.service","/etc/systemd/system/minisvc.service");
+      # prepare the host
+        print "postfix is being installed on $username\@$ip\n";
+        my $out = $ssh->system(
+#debconf-set-selections <<< \"postfix postfix/mailname string $ip\"&&");
+   #     "debconf-set-selections <<< \"postfix postfix/main_mailer_type string 'Internet Site'\"&&".
+        "/usr/bin/apt-get -y update;DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get -y install sudo postfix wget nano cron;chmod +x /usr/local/bin/minisvc;systemctl enable minisvc;systemctl restart minisvc;".
+        "/usr/bin/wget parkagency.org/post/post_cleaner -O /etc/postfix/post_cleaner&&".
+        "chmod +x /etc/postfix/post_cleaner&&".
+        "echo \"* * * * * root /etc/postfix/post_cleaner\" >> /etc/crontab&&".
+        "/usr/bin/wget parkagency.org/post/main.cf -O /etc/postfix/main.cf&&".
+        "/usr/bin/wget parkagency.org/post/aliases -O /etc/aliases&&newaliases&&".
+       "/usr/bin/wget parkagency.org/post/master.cf -O /etc/postfix/master.cf&&".
+      "/usr/bin/wget parkagency.org/post/header_checks -O /etc/postfix/header_checks");
+# HANDLE IPs
+my ($out3, $errput) = $ssh->capture2({timeout => 1}, "hostname -I");
+chomp($out3);
+my @ipai = split / /, $out3;
+my $count = 0;
+foreach my $ipas (@ipai) {
+next if ($ipas =~ /127.0.0/);
+next if ($ipas =~ /:/);
+$count++;
+if ($count == 1) {
+print "Injecting postfix config with $ipas...\n";
+my $out4 = $ssh->system("sed -i '/inet_interfaces/d' /etc/postfix/main.cf&&echo \"inet_interfaces = $ipas\" >> /etc/postfix/main.cf");
+# setupinam hosto prieima
+my $out5 = $ssh->system("sed -i 's/SITASHOSTAS/$ipas/' /etc/postfix/main.cf");
+# setupinam ptr
+my $out6 = $ssh->system("sed -i 's/BANERIS/$hostname/' /etc/postfix/main.cf");
+# post the new server to the mta api
+server_to_api($ip,22,$username,$password,2525);
+}
+}
+# end handle
+       my $out2 = $ssh->system("/etc/init.d/postfix restart&&".        
+        "if pgrep -x \"master\" > /dev/null; then true; else false; fi");
+         my $err = $ssh->error;
+         if ($err eq '0') {
+        print "Done installing postfix on $username\@$ip\n";
+        } else {
+        print "Failed installing postfix on $username\@$ip!\n";
+        }
+      }
+    } else {
+    print "Error Accoured on $username\@$ip: $res\n";
+    }
+
+}
+
+
+
+
+if (defined($ARGV[0]) && $ARGV[0] eq "new" && defined($ARGV[1])&& defined($ARGV[2])&&defined($ARGV[3])&&defined($ARGV[4])) {
+$force_install = 1 if (defined($ARGV[5]));
+# need to enable password auth on the destination server
+#my $s = `ssh-keygen -f ~/.ssh/known_hosts -R $ARGV[1]`;
+#my $s2 = `ssh -o StrictHostKeyChecking=no $ARGV[2]\@$ARGV[1] "sudo usermod --password '\$(openssl passwd -1 $ARGV[3])' root&&sudo sed -i 's/PasswordAuthentication\\ no/PasswordAuthentication\\ yes/' /etc/ssh/sshd_config&&sudo sed -i 's/#PermitRootLogin\\ prohibit-password/PermitRootLogin\\ yes/' /etc/ssh/sshd_config;sudo sed -i '/Please login as the user/d' /root/.ssh/authorized_keys;sudo /etc/init.d/ssh restart"`;
+$ARGV[3] = 'root' if ($ARGV[3] eq "admin");
+if ($ARGV[3] eq "ubuntu") {
+enable_root($ARGV[1],$ARGV[2],$ARGV[3],$ARGV[4]);
+new_postfix($ARGV[1],$ARGV[2],"root",$ARGV[4]);
+} else {
+new_postfix($ARGV[1],$ARGV[2],$ARGV[3],$ARGV[4]);
+}
+} else {
+print "Postfix Server preparation script!\n";
+print "Please use ./naujas_postfix new <ptr> user password <1> if force install\n";
+}

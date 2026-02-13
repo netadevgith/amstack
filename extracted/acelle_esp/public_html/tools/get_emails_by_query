@@ -1,0 +1,46 @@
+#!/usr/bin/perl -w
+my $out = "mailai.txt";
+use strict;
+use warnings;
+use DBI;
+use Redis;
+my $dbh;
+my %env; # variable to put laravel settings in
+my %settings = ();
+my $QUERY = "SELECT email FROM `trackingas`.`app_openai` WHERE email like '%\@kpnmail.nl%' or email like '%\@kpnplanet.nl%' or email like '%\@planet.nl%' or email like '%\@wxs.nl%' or email like '%\@hetnet.nl%' or email like '%\@freeler.nl%' or email like '%\@onsbrabantnet.nl%' or email like '%\@onsmail.nl%' or email like '%\@onsneteindhoven.nl%' or email like '%\@onsnetnuenen.nl%'";
+sub get_emails_by_query {
+my $sth = $dbh->prepare($QUERY);
+$sth->execute();
+my $emails = $sth->fetchall_arrayref({});
+open(FILE,">".$out);
+print FILE "EMAIL\n";
+for my $email (@$emails) {
+print FILE $email->{email}."\n";
+}
+close(FILE);
+}
+
+
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+read_lavonelis();
+dbconn();
+get_emails_by_query();

@@ -1,0 +1,78 @@
+#!/usr/bin/php
+<?php
+
+require_once("settings.php");
+require_once("functions.php");
+
+//$data = json_encode(array('justinas@res.lt','justinas@eofnet.lt'));
+//$data = json_encode(array('justinas@eofnet.lt'));
+
+$pages_array = array(
+     array(
+         'email' => 'bybasas@gmail.com',
+         'ip_address' => '1.1.1.1',
+         'server_ip' => '127.0.0.1',
+         'server_ptr' => 'localhost',
+         'user_agent' => 'Internet exploder',
+         'location' => 'Prussia',
+         'when' => 'now',
+         'mx' => 'mx.gmail.com',
+         'deployment' => 'appB',
+         'domain' => 'bybasas.lt',
+         'campaign' => 'iddqd',
+         'maillist' => 'de list'
+     ),
+
+     array(
+         'email' => 'cernobylis@gmail.com',
+         'ip_address' => '1.1.1.1',
+         'server_ip' => '127.0.0.1',
+         'server_ptr' => 'localhost',
+         'user_agent' => 'Internet exploder',
+         'location' => 'Prussia',
+         'when' => 'now',
+         'mx' => 'mx.gmail.com',
+         'deployment' => 'appB',
+         'domain' => 'bybasas.lt',
+         'campaign' => 'iddqd',
+         'maillist' => 'de list' 
+
+     ),
+
+     array(
+         'email' => 'testas@gmail.com',
+         'ip_address' => '1.1.1.1',
+         'server_ip' => '127.0.0.1',
+         'server_ptr' => 'localhost',
+         'user_agent' => 'Internet exploder',
+         'location' => 'Prussia',
+         'when' => 'now',
+         'mx' => 'mx.gmail.com',
+         'deployment' => 'appB',
+         'domain' => 'bybasas.lt',
+         'campaign' => 'iddqd',
+         'maillist' => 'de list' 
+
+     )
+);
+
+function submit_opener($email,$ip,$server_ip,$server_ptr,$user_agent,$location,$deployment,$domain,$campaign,$maillist) {
+global $key,$api;
+$created_date = date("Y-m-d H:i:s");
+$item = json_encode(array(array('email'=>$email,'ip_address'=>$ip,'server_ip' => $server_ip,'server_ptr'=>$server_ptr,'user_agent'=>$user_agent,'location'=>$location,'date_added'=>$created_date,'deployment'=>$deployment,'domain'=>$domain,'campaign'=>$campaign,'maillist'=>$maillist)));
+$code = StoragePost($key,"http://$api/api/v1/openers/submit",$item);
+print StatusCodeDescription($code);
+}
+
+//$json = json_encode($pages_array);
+//print_r($json);
+//$reason = "Test reason :D";
+
+//$code = StoragePost($key,"http://$api/api/v1/openers/submit",$json);
+//echo "We got: ".$code."\n";
+//print StatusCodeDescription($code);
+submit_opener('testas1@gmail.com','83.23.20.221','10.1.1.1','server.lan','Internet Exploder','Nigeria','appX','testas.com','UID112','UID113');
+submit_opener('testas2@gmail.com','83.23.20.221','10.1.1.1','server.lan','Internet Exploder','Nigeria','appX','testas.com','UID112','UID113');
+submit_opener('testas3@gmail.com','83.23.20.221','10.1.1.1','server.lan','Internet Exploder','Nigeria','appX','testas.com','UID112','UID113');
+submit_opener('testas4@gmail.com','83.23.20.221','10.1.1.1','server.lan','Internet Exploder','Nigeria','appX','testas.com','UID112','UID113');
+?>

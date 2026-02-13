@@ -1,0 +1,18 @@
+#!/usr/bin/php
+<?php
+if ($argv[1] == "") {
+echo "Please provide a email for the first parameter of this script\n";
+exit;
+}
+require("settings.php");
+require_once("functions.php");
+$email = $argv[1];
+echo "Testing quering for email $email\n";
+if (get_storage_obj('blacklists/check/',$email)) {
+echo "This record exists on the remote database!\n";
+} else {
+echo "This record does not exist on the remote database!\n";
+}
+//var_dump($obj);
+//print_r($obj);
+?>

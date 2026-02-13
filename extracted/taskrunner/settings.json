@@ -1,0 +1,8 @@
+{
+        "LoadLimitVal" : 20,
+        "LoadLimitEnabled" : true,
+        "Logging": true,
+        "LaravelConfig": "../public_html/.env",
+        "AutoFreeQueue": true
+}
+

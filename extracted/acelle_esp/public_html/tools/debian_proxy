@@ -1,0 +1,83 @@
+#!/usr/bin/perl -w
+# debian based proxy auto deployer
+# prereq: apt install libnet-openssh-perl libio-pty-perl libmojolicious-perl libfile-slurp-perl
+
+my $debug = 1;
+my $force_install = 0;
+use warnings;
+use strict;
+use POSIX "setsid";
+use Net::OpenSSH;
+use Data::Dumper;
+use POSIX ":sys_wait_h";
+use Time::HiRes qw(sleep);
+use Socket;
+use Time::localtime;
+use Mojo::UserAgent;
+use File::Basename;
+use File::Slurp;
+my $scriptdir = undef;
+$scriptdir = dirname($0);
+my $ua  = Mojo::UserAgent->new;
+Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+my $mta_api = 'http://mta.parkagency.org/api.php';
+my $deployment_api = 'http://app12.parkagency.org/api/';
+sub inject_text {
+my ($destination,$text) = @_;
+
+}
+
+
+sub server_to_api {
+my ($host,$sshport,$sshusername,$sshpassword,$smtpport) = @_;
+#$ua->post($mta_api.'?addserver&post=1' => {Accept => '*/*'} => form => { 'hosttype' => 'postfix', 'host' => $host, 'sshport' => $sshport, 'sshusername' => $sshusername, 'sshpassword' => $sshpassword, 'smtpport' => $smtpport });
+}
+
+
+sub new_proxy {
+my ($ip,$deployment,$username,$password) = @_;
+print "Setting up server: $ip\n";
+my $port = 22;
+my $ssh;
+if ($password eq "key") {
+$ssh = Net::OpenSSH->new(host=>$ip, user=>$username,
+                port=>$port,
+                key_path => '~/.ssh/id_rsa',master_opts => [-o => "StrictHostKeyChecking=no",-o => "UserKnownHostsFile=/dev/null" ]);
+
+} else {
+$ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => "StrictHostKeyChecking=no", -o => "UserKnownHostsFile=/dev/null" ], timeout => 30);
+}
+
+    my $res = $ssh->error;
+    chomp $res;
+    if ($res eq '0') {
+        print "proxy is being installed on $username\@$ip\n";
+        my $out = $ssh->system(
+       "/etc/init.d/apache2 stop;apt-get remove --purge -y apache2-bin;".
+       "apt-get update;apt-get install -y nginx;".
+       "echo 'done'");
+
+# upload fix
+my $optz={recursive => 1, glob => 1, timeout => 1000, quiet => 0,stderr_to_stdout => 1};
+$ssh->scp_put($optz, $scriptdir."/debian_proxy_nginx_template","/etc/nginx/sites-enabled/default");
+# edit config
+my $out5 = $ssh->system("sed -i 's,DEPLOYMENT,$deployment,g' /etc/nginx/sites-enabled/default");
+#server_to_api($ip,22,$username,$password,2525);
+my $out2 = $ssh->system("/etc/init.d/nginx reload");
+} else {
+print "Unable to connect\n";
+}
+}
+
+
+if (defined($ARGV[0]) && $ARGV[0] eq "new" && defined($ARGV[1])&& defined($ARGV[2])&&defined($ARGV[3])&&defined($ARGV[4])) {
+$force_install = 1;# if (defined($ARGV[5]));
+# need to enable password auth on the destination server
+#my $s = `ssh-keygen -f ~/.ssh/known_hosts -R $ARGV[1]`;
+#my $s2 = `ssh -o StrictHostKeyChecking=no $ARGV[2]\@$ARGV[1] "sudo usermod --password '\$(openssl passwd -1 $ARGV[3])' root&&sudo sed -i 's/PasswordAuthentication\\ no/PasswordAuthentication\\ yes/' /etc/ssh/sshd_config&&sudo sed -i 's/#PermitRootLogin\\ prohibit-password/PermitRootLogin\\ yes/' /etc/ssh/sshd_config;sudo sed -i '/Please login as the user/d' /root/.ssh/authorized_keys;sudo /etc/init.d/ssh restart"`;
+$ARGV[3] = 'root' if ($ARGV[3] eq "admin");
+new_proxy($ARGV[1],$ARGV[2],$ARGV[3],$ARGV[4]);
+} else {
+print "Proxy Server preparation script!\n";
+print "Please use $0 new <ip> <deployment> user password\n";
+}

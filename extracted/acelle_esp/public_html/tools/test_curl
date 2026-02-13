@@ -1,0 +1,12 @@
+#!/usr/bin/perl -w
+
+use warnings;
+use strict;
+use Data::Dumper;
+use Mojo::UserAgent;
+my $ua  = Mojo::UserAgent->new;
+$ua->transactor->name('Minver18');
+Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+my $tx = $ua->post('http://devtest.parkagency.net/api/initializedns' => form => { 'api_key' => 1122, 'domain' => 'lacanth.info', 'ip' => '142.93.231.77' });
+print $tx->{res}{content}{asset}{content};
+#$json = decode_json($tx->{res}{content}{asset}{content});

@@ -1,0 +1,12 @@
+#!/bin/bash
+USER=root
+PASS=tcZvalaUJsWecLgy5jfn
+cd $HOME/public_html/tools
+if [ "$1" == "stop" ]; then
+echo "Stopping batch processing"
+while read HOST ; do echo -n $HOST " "; kill -9 `ps aux|grep perl|grep $HOST|awk '{print $2}'`& < /dev/null; done < servers.lst
+else
+echo "Starting batch processing"
+while read HOST ; do echo -n $HOST" "; ./parse_postfix $HOST "$USER" "$PASS"& < /dev/null; done < servers.lst
+fi
+

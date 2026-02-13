@@ -1,0 +1,105 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+
+use JSON::XS;
+use Time::localtime;
+use Time::HiRes qw(usleep nanosleep gettimeofday);
+use DBI;
+#use Try::Tiny;
+use Getopt::Long;
+use File::Basename;
+use Cwd qw(getcwd);
+use Mojo::UserAgent;
+use POSIX qw(strftime);
+my $ua  = Mojo::UserAgent->new;
+Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+my $scriptdir = undef;
+$scriptdir = dirname($0);
+my %env; # variable to put laravel settings in
+my $dbh;
+$env{DB_HOST} = "163.172.124.251";
+$env{DB_DATABASE} = "trackingas";
+$env{DB_USERNAME} = "ses_remote";
+$env{DB_PASSWORD} = "bGh9CaF897q";
+$env{DB_PORT} = 3306;
+my $storage_api = "http://116.202.114.76:8081/";
+my $storage_key = "Ab0Zb1zB04mP";
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:database=".$env{DB_DATABASE}.";host=".$env{DB_HOST}.";port=".$env{DB_PORT}, $env{DB_USERNAME}, $env{DB_PASSWORD},{ PrintError => 1, RaiseError => 0 }) or do {
+die "Unable to connect to MySQL\n"; };
+}
+
+sub openai {
+my $QUERY = "SELECT email,ip_address,server_ip,server_ptr,user_agent,location,`when`,mx,deployment,domain,campaign,maillist FROM app_openai";
+my $sth = $dbh->prepare($QUERY);
+$sth->execute();
+my $emails = $sth->fetchall_arrayref({});
+my $count = 0;
+my $total = scalar(@$emails);
+for my $email (@$emails) {
+$count++;
+# $item = json_encode(array(array('email'=>$email,'ip_address'=>$ip,'server_ip' => $server_ip,'server_ptr'=>$server_ptr,'user_agent'=>$user_agent,
+# 'location'=>$location,'date_added'=>$created_date,'deployment'=>$deployment,'domain'=>$domain,'campaign'=>$campaign,'maillist'=>$maillist)));
+my @records;
+my %hash = ( email => $email->{email}, ip_address => $email->{ip_address}, server_ip => $email->{server_ip}, server_ptr => $email->{server_ptr}, user_agent => $email->{user_agent},
+location => $email->{location}, date_added => $email->{when}, mx => $email->{mx}, deployment => $email->{deployment}, domain => $email->{domain}, campaign => $email->{campaign}, maillist => $email->{maillist} );
+push( @records, \%hash );
+my $tx = $ua->build_tx(POST => $storage_api."api/v1/openers/submit");
+$tx->req->headers->header('Content-Type', 'text/json');
+$tx->req->headers->header('Authorization',$storage_key);
+$tx->req->body(encode_json(\@records));
+$ua->start($tx);
+print "Processing data $count of $total ...\r";
+}
+}
+sub clickai {
+my $QUERY = "SELECT email,ip_address,mx,user_agent,location,`when`,campaign FROM app_clickai";
+my $sth = $dbh->prepare($QUERY);
+$sth->execute();
+my $emails = $sth->fetchall_arrayref({});
+my $count = 0;
+my $total = scalar(@$emails);
+for my $email (@$emails) {
+$count++;
+my @records;
+my %hash = ( email => $email->{email}, ip_address => $email->{ip_address}, server_ip => '', server_ptr => '', mx => $email->{mx}, user_agent => $email->{user_agent},
+location => $email->{location}, date_added => $email->{when}, deployment => '', domain => '', campaign => '', maillist => '' );
+push( @records, \%hash );
+my $tx = $ua->build_tx(POST => $storage_api."api/v1/clickers/submit");
+$tx->req->headers->header('Content-Type', 'text/json');
+$tx->req->headers->header('Authorization',$storage_key);
+$tx->req->body(encode_json(\@records));
+$ua->start($tx);
+print "Processing data $count of $total ...\r";
+}
+}
+
+sub deliveriai {
+my $QUERY = "SELECT email,domain FROM deliveries";
+my $sth = $dbh->prepare($QUERY);
+$sth->execute();
+my $emails = $sth->fetchall_arrayref({});
+my $count = 0;
+my $total = scalar(@$emails);
+my $now = strftime "%Y-%m-%d %H:%M:%S", gmtime();
+for my $email (@$emails) {
+$count++;
+my @records;
+my %hash = ( email => $email->{email}, campaign => '', server_ip => '', deployment => '', status => '', date_added => $now );
+push( @records, \%hash );
+my $tx = $ua->build_tx(POST => $storage_api."api/v1/deliveries/submit");
+$tx->req->headers->header('Content-Type', 'text/json');
+$tx->req->headers->header('Authorization',$storage_key);
+$tx->req->body(encode_json(\@records));
+$ua->start($tx);
+print "Processing data $count of $total ...\r";
+}
+}
+dbconn
+dbconn();
+openai();
+clickai();
+deliveriai();

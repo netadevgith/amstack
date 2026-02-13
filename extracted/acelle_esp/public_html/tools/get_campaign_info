@@ -1,0 +1,11 @@
+#!/usr/bin/perl
+use Redis;
+use JSON::XS;
+use Data::Dumper;
+die "Campaign uid not specified " if (!defined($ARGV[0]));
+my $campuid = $ARGV[0];
+print "Campaign uid: $campuid\n";
+my $redis = Redis->new(server => '127.0.0.1:6379', reconnect => 10);
+my $campaign = decode_json($redis->get($campuid));
+#print Dumper($campaign);
+print $campaign->{html}."\n";

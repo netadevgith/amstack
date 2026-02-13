@@ -1,0 +1,7 @@
+gosender 4.0 plans
+
+* reorganize all code into different files
+* no static variables in the code
+* create gosender_internals.json for specific then static variables or use defaults as file is not in the place
+* add support for different email encoding types
+

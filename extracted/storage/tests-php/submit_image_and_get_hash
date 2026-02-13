@@ -1,0 +1,10 @@
+#!/usr/bin/php
+<?php
+require_once("functions.php");
+require_once("settings.php");
+$file = "./image.gif";
+$hash = md5_file($file);
+echo 'MD5 file hash of: ' . $file . ': ' . $hash."\n";
+$code = StorageImagePost($key,"http://$api/api/v1/links/postimg",$file,$hash);
+print StatusCodeDescription($code);
+?>

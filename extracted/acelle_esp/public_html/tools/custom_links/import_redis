@@ -1,0 +1,28 @@
+#!/usr/bin/perl -w
+
+use Redis;
+use JSON::XS;# qw(decode_json encode_json);
+use Data::Dumper;
+my $redis = Redis->new(server => '127.0.0.1:6379', reconnect => 60);
+$redis->del("clickpart");
+$redis->del("openpart");
+$redis->del("profilepart");
+$redis->del("sourcepart");
+$redis->del("unsubscribepart");
+
+sub make_import {
+my ($list,$file) = @_;
+open(my $fh, '<:encoding(UTF-8)', $file) or die "Could not open file '$file' $!";
+while (my $row = <$fh>) {
+chomp $row;
+$redis->sadd($list, $row);
+}
+}
+
+
+# list name, filename
+make_import("clickpart","click_part");
+make_import("openpart","open_part");
+make_import("profilepart","update_part");
+make_import("sourcepart","source_part");
+make_import("unsubscribepart","unsubscribe_part");

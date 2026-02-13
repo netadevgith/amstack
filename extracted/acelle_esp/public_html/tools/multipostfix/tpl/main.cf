@@ -1,0 +1,49 @@
+data_directory = /var/lib/postfix-{NR}
+queue_directory = /var/spool/postfix-{NR}
+multi_instance_name = {IP}
+inet_protocols = ipv4
+inet_interfaces = {IP}
+myhostname = {DNS}
+#compatibility_level = 2
+authorized_submit_users = 
+mail_owner = postfix
+mail_owner = postfix
+mydestination = $myhostname, localhost.$mydomain, localhost
+unknown_local_recipient_reject_code = 550
+alias_maps = hash:/etc/aliases
+alias_database = hash:/etc/aliases
+debugger_command =
+         PATH=/bin:/usr/bin:/usr/local/bin:/usr/X11R6/bin
+         ddd $daemon_directory/$process_name $process_id & sleep 5
+sendmail_path = /usr/sbin/sendmail.postfix
+newaliases_path = /usr/bin/newaliases.postfix
+mailq_path = /usr/bin/mailq.postfix
+setgid_group = postdrop
+html_directory = no
+manpage_directory = /usr/share/man
+master_service_disable =
+authorized_submit_users =
+mynetworks = $myhostname, 78.46.73.84, 138.201.204.221, 138.201.204.244, 138.201.204.248, 138.201.204.249, 138.201.204.253, 78.46.73.106, 78.46.73.107, 78.46.73.110, 78.46.73.115, 78.47.212.26, 78.47.212.27, 78.47.212.28, 78.47.212.29
+header_checks = regexp:/etc/postfix/header_checks
+smtp_tls_security_level = may
+smtp_helo_name = $myhostname
+always_add_missing_headers = yes
+smtpd_banner = $myhostname ESMTP $mail_name (Debian/GNU)
+smtpd_relay_restrictions = permit_mynetworks reject_unauth_destination
+multi_instance_enable = yes
+## OPTIMIZE
+# messages in the deferred queue are returned to the sender with an undelivered notice
+maximal_queue_lifetime = 5s
+# determines the time between deferred queue scans by the queue manager. The default is 1,000 seconds
+queue_run_delay=1000s
+# determines the minimal time between attempts to deliver a deferred message
+minimal_backoff_time=1000s
+# determines the maximal time between attempts to deliver a message.
+maximal_backoff_time=4000s
+default_destination_concurrency_limit=100
+smtp_destination_concurrency_limit=500
+default_process_limit=400
+default_destination_rate_delay = 0
+smtp_connection_cache_on_demand = yes
+smtp_connection_cache_time_limit = 30s
+smtp_connection_reuse_time_limit = 600s

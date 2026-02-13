@@ -1,0 +1,113 @@
+<?php
+
+/**
+ * Blacklist class.
+ *
+ * Model for blacklisted email addresses
+ *
+ * LICENSE: This product includes software developed at
+ * the Acelle Co., Ltd. (http://acellemail.com/).
+ *
+ * @category   MVC Model
+ *
+ * @author     N. Pham <n.pham@acellemail.com>
+ * @author     L. Pham <l.pham@acellemail.com>
+ * @copyright  Acelle Co., Ltd
+ * @license    Acelle Co., Ltd
+ *
+ * @version    1.0
+ *
+ * @link       http://acellemail.com
+ */
+
+namespace Acelle\Model;
+
+use Acelle\Http\Controllers\Auth\LoginController;
+use Illuminate\Database\Eloquent\Model;
+use Acelle\Library\Log as MailLog;
+
+class Blacklist_mx extends Model
+{
+    // Subscribers to import every time
+    const IMPORT_STATUS_NEW = 'new';
+    const IMPORT_STATUS_RUNNING = 'running';
+    const IMPORT_STATUS_FAILED = 'failed';
+    const IMPORT_STATUS_DONE = 'done';
+    protected $table = 'blacklist_mx';
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var array
+     */
+    protected $fillable = [
+        'name', 'reason'
+    ];
+
+    /**
+     * Get all items.
+     *
+     * @return collect
+     */
+    public static function getAll()
+    {
+        return self::select('blacklist_mx.*');
+    }
+
+    /**
+     * Filter items.
+     *
+     * @return collect
+     */
+    public static function filter($request)
+    {
+        $user = $request->user();
+        $query = self::select('blacklist_mx.*');
+
+        // Keyword
+        if (!empty(trim($request->keyword))) {
+            foreach (explode(' ', trim($request->keyword)) as $keyword) {
+                $query = $query->where(function ($q) use ($keyword) {
+                    $q->orwhere('blacklist_mx.record', 'like', '%'.$keyword.'%');
+                });
+            }
+        }
+
+        // Other filter
+        if(!empty($request->customer_id)) {
+            $query = $query->where('blacklist_mx.customer_id', '=', $request->customer_id);
+        }
+
+        if(!empty($request->admin_id)) {
+            $query = $query->whereNull('customer_id');
+        }
+
+        return $query;
+    }
+
+    /**
+     * Search items.
+     *
+     * @return collect
+     */
+    public static function search($request)
+    {
+        $query = self::filter($request);
+
+        if(!empty($request->sort_order)) {
+            $query = $query->orderBy($request->sort_order, $request->sort_direction);
+        }
+
+        return $query;
+    }
+
+    /**
+     * Items per page.
+     *
+     * @var array
+     */
+    public static $itemsPerPage = 25;
+
+
+
+}

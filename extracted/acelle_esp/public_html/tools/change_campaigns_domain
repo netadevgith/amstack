@@ -1,0 +1,126 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+use DBI;
+use Redis;
+use Data::Dumper;
+use JSON::XS;
+my $dbh;
+my %env; # variable to put laravel settings in
+my %settings = ();
+#my $scriptdir = undef;
+#$scriptdir = dirname($0);
+
+sub campaign_pause {
+my ($email) = @_;
+my $sth = $dbh->prepare("select campaigns.uid from subscribers inner join campaigns_lists_segments on subscribers.mail_list_id = campaigns_lists_segments.mail_list_id inner join campaigns on campaigns_lists_segments.campaign_id = campaigns.id where subscribers.email = ?");
+$sth->execute($email);
+my $campaigns = $sth->fetchall_arrayref({});
+for my $camp (@$campaigns) {
+print "Campaign: $camp->{uid}\n";
+my $redis = Redis->new(server => '127.0.0.1:6379', reconnect => 60);
+# jeigu egzistuoja keywordas
+if ($redis->exists($camp->{uid}."_paused")) {
+$redis->del($camp->{uid}."_paused");
+}
+$redis->set($camp->{uid}."_paused","Is backend, pagautas del hardbounce $email");
+}
+}
+
+sub logsql {
+my ($text) = @_;
+my $sth = $dbh->prepare("INSERT INTO controller_logs (text) VALUES(?)");
+$sth->execute($text);
+}
+
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+# auto_change_domain(campaign_uid);
+sub auto_change_domain {
+my ($uidas, $force_all) = @_;
+# get curr domain
+my $sta = $dbh->prepare("select value from settings where name = ?");
+$sta->execute("global_tracking");
+my $domvar = $sta->fetchall_arrayref({});
+my $current_dom = @$domvar[0]->{value};
+chomp($current_dom);
+print "Current: $current_dom\n";
+# get all domains
+my $sth = $dbh->prepare("select reiksm from nustatymai where id = 6");
+$sth->execute();
+my $var = $sth->fetchall_arrayref({});
+my @domains = split "\n", @$var[0]->{reiksm};
+my $dom_count = scalar @domains-1;
+my $count = 0;
+while (@domains) {
+  my $item = $domains[$count];
+  chomp($item);
+  if ($item eq $current_dom) {
+ last;
+ }
+$count++;
+last if ($count >= $dom_count);
+}
+# add one more number and check it now
+if ($count >= $dom_count) {
+$count = 0;
+} else {
+$count++;
+}
+print "Calculated id: $count from $dom_count\n";
+print "Selected domain: ".$domains[$count]."\n";
+my $from = "info\@".$domains[$count];
+if ($force_all == 1) {
+my $stb = $dbh->prepare("UPDATE settings set value = ? WHERE name = 'global_tracking'");
+$stb->execute($domains[$count]);
+}
+my $redis = Redis->new(server => '127.0.0.1:6379', reconnect => 60);
+# jeigu egzistuoja keywordas
+if ($redis->exists($uidas)) {
+my $data = $redis->get($uidas);
+my $json = decode_json($data);
+$json->{from_email} = "info\@".$domains[$count];
+$json->{trackurl} = $domains[$count]; # tik vienai partijai, paskuj uzsideda is globalo
+$redis->set($uidas,encode_json($json));
+logsql("Campaign: $uidas sending information changed to: ".$domains[$count]);
+}
+#my $stc = $dbh->prepare("UPDATE campaigns set from_email = ?, reply_to = ? where uid = ?");
+#$stc->execute($from,$from,$uidas);
+
+} # end auto_change_domain
+
+read_lavonelis();
+dbconn();
+
+
+#campaign_pause("a.mahlamaki\@netikka.fi");
+
+#logsql("sql text from backend");
+
+
+my $sth = $dbh->prepare("select campaigns.uid from campaigns");
+$sth->execute();
+my $campaigns = $sth->fetchall_arrayref({});
+for my $camp (@$campaigns) {
+print "Changing campaign: $camp->{uid} tracking domain...\n";
+auto_change_domain($camp->{uid},1);
+}

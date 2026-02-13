@@ -1,0 +1,15 @@
+#!/usr/bin/php
+<?php
+
+require_once("settings.php");
+require_once("functions.php");
+
+//$data = json_encode(array('justinas@res.lt','justinas@eofnet.lt'));
+$data = json_encode(array('justinas@eofnet.lt'));
+
+$reason = "Test reason :D";
+$code = StoragePost($key,"http://$api/api/v1/blacklists/set/1",$data,$reason);
+echo "We got: ".$code."\n";
+StatusCodeDescription($code);
+
+?>

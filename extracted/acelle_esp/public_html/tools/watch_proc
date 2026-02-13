@@ -1,0 +1,2 @@
+#!/bin/sh
+watch -n1 "ps x|grep mailsend|awk '{print \"Sending to: \"\$14}'|uniq|sort"

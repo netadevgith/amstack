@@ -1,0 +1,95 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+use Data::Dumper;
+use DBI;
+my %env;
+my $dbh;
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+read_lavonelis();
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+dbconn();
+
+my %email;
+sub get_email_info {
+my ($email) = @_;
+my $sth = $dbh->prepare("SELECT id, mail_list_id, email FROM subscribers where email like ?");
+$sth->execute($email);
+my $results = $sth->fetchall_arrayref({});
+$sth->finish();
+return $results;
+}
+
+sub get_servers {
+my ($srv_id) = @_;
+if ($srv_id > 0) {
+my $sth = $dbh->prepare("SELECT sending_server_id FROM mail_lists_sending_servers where mail_list_id = ?");
+$sth->execute($srv_id);
+return $sth->fetchall_arrayref({});
+} # validation check end
+return 0;
+} # func end
+
+sub get_max_srv_id {
+my $sth = $dbh->prepare("select max(id) as max from sending_servers");
+$sth->execute();
+my $var = $sth->fetchall_arrayref({});
+return @$var[0]->{max};
+}
+
+sub change_server {
+my ($old_id,$maillist_id) = @_;
+my $max = get_max_srv_id();
+print "[INFO] Max server id: $max\n";
+print "[INFO] Old server id: $old_id, mail list id: $maillist_id\n";
+my $sth = $dbh->prepare("DELETE FROM  \`mail_lists_sending_servers\` where mail_list_id = ? and sending_server_id = ?");
+$sth->execute($maillist_id,$old_id);
+my $stha = $dbh->prepare("INSERT INTO \`mail_lists_sending_servers\`(\`sending_server_id\`, \`mail_list_id\`) VALUES (?,?)");
+$old_id++;
+$old_id = 1 if ($old_id > $max);
+$stha->execute($old_id,$maillist_id);
+my $new_id = $dbh->last_insert_id(undef, undef, 'mail_lists_sending_servers', 'id');
+print "[INFO] New server id: $old_id increment id: $new_id\n";
+}
+
+read_lavonelis();
+if (defined($ARGV[0])) {
+my $email = get_email_info($ARGV[0]);
+print "[INFO] Examining $ARGV[0]...\n";
+for my $row (@$email) {
+#change_server(
+my $servers = get_servers($row->{mail_list_id});
+if (@$servers) { # check if variable is not empty array
+# we need to foreach each server
+for my $server (@$servers) {
+# we need to pass argument to change the server
+change_server($server->{sending_server_id},$row->{mail_list_id}); # pass old server id, maillist id
+}
+# end servers section
+} else { # check if array end
+print "[ERROR] Email $ARGV[0] belongs to maillist $row->{mail_list_id} that does not have any active server\n";
+}
+
+}
+
+} else {
+print "Use: $0 <email>\n";
+}

@@ -1,0 +1,122 @@
+#!/usr/bin/perl -w
+my $ua  = Mojo::UserAgent->new;
+Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+my $mta_api = 'http://mta.packagency.org/api.php';
+use strict;
+use warnings;
+use POSIX "setsid";
+use Net::OpenSSH;
+use Data::Dumper;
+use POSIX ":sys_wait_h";
+use Time::HiRes qw(sleep);
+use Socket;
+use JSON::XS;
+use Time::localtime;
+use Mojo::UserAgent;
+use File::Basename;
+use File::Slurp;
+my $scriptdir = undef;
+$scriptdir = dirname($0);
+my $debug = 1;
+my $force_install = 0;
+
+
+
+sub server_to_api {
+my ($host,$sshport,$sshusername,$sshpassword,$smtpport) = @_;
+$ua->post($mta_api.'?addserver&post=1' => {Accept => '*/*'} => form => { 'hosttype' => 'pmta', 'host' => $host, 'sshport' => $sshport, 'sshusername' => $sshusername, 'sshpassword' => $sshpassword, 'smtpport' => $smtpport });
+}
+
+sub put_file {
+my ($scp,$from,$to) = @_;
+my $opts={recursive => 1, glob => 1, timeout => 1000, quiet => 0,stderr_to_stdout => 1};
+$scp->scp_put($opts, $scriptdir.$from, $to);
+}
+
+sub new_pmta {
+my ($ip,$username,$password,@domains) = @_;
+my $domens = "";
+print "Got server details: $ip $username $password\n" if ($debug > 0);
+my $main_dom = "";
+my $countv = 0;
+foreach my $domain(@domains) {
+$countv++;
+$main_dom = $domain if ($countv == 1);
+$domens = $domens . " $domain";
+}
+print "Got domains for dnses: $domens\n" if ($debug > 0);
+# actual code begins here
+my $port = 22;
+my $ssh;
+if ($password eq "key") {
+$ssh = Net::OpenSSH->new(host=>$ip, user=>$username,
+                port=>$port,
+                key_path => '~/.ssh/id_rsa',master_opts => [-o => "StrictHostKeyChecking=no"]);
+
+} else {
+$ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => "StrictHostKeyChecking=no"], timeout => 30);
+}
+# check if connection was made successfull
+    my $res = $ssh->error;
+    chomp $res;
+    if ($res eq '0') {
+   print "powermta is being installed on $username\@$ip\n";
+#        my $out = $ssh->system(
+#       "apt-get update;debconf-set-selections <<< \"postfix postfix/mailname string localhost\";debconf-set-selections <<< \"postfix postfix/main_mailer_type string 'Internet Site'\";DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get -y install sudo postfix wget nano libmath-round-perl libfile-slurp-perl libmojolicious-perl libjson-xs-perl libmath-round-perl;".
+#       "postmulti -e init;sed -i \"/^inet_interfaces = /s/=.*/=127.0.0.1/\" /etc/postfix/main.cf;/etc/init.d/postfix restart;mkdir -p /root/tpl;wget http://devnull.eofnet.lt/header_checks -O /etc/postfix/header_checks;postmulti -p stop");
+# put all necessary files to the target vps
+# we need to update the system...
+my $out66  = $ssh->system("apt-get update;apt-get -y install libmath-round-perl libfile-slurp-perl libmojolicious-perl libjson-xs-perl libmath-round-perl;apt-get -y remove postfix*");
+put_file($ssh,"/multipmta/dns_change","/root/dns_change");
+put_file($ssh,"/multipmta/multi","/root/multi");
+put_file($ssh,"/multipmta/PowerMTA-5.0r7.tar.gz","/root/pmta.tar.gz");
+# chmod +x all uploaded scripts
+my $out44 = $ssh->system("tar xzvf /root/pmta.tar.gz -C /;rm /root/pmta.tar.gz");
+# cut down the licenses
+put_file($ssh,"/multipmta/blacklist.dat","/etc/pmta/blacklist.dat");
+my $licenses = $ssh->system("sed -i '/serial/d' /etc/pmta/license;sed -i '/license/d' /etc/pmta/license; sed -i '/mac/d' /etc/pmta/license");
+my $out1 = $ssh->system("chmod +x /root/dns_change /root/multi");
+my $out55 = $ssh->system("pmtakeytool newdk edm-mail $main_dom 2048&&mv edm-mail.$main_dom.pem /etc/dkim.key");
+my $last = $ssh->system("/root/dns_change".$domens."&&/root/multi $main_dom&&/etc/init.d/pmta stop&&/etc/init.d/pmta start&&/etc/init.d/pmtahttp stop&&/etc/init.d/pmtahttp start");
+
+my ($out3, $errput) = $ssh->capture2({timeout => 1}, "cat /root/ip_addr");
+chomp($out3);
+my @dnses = split /\n/, $out3;
+my $count = 0;
+my %result;
+foreach my $ipas (@dnses) {
+next if ($ipas =~ /127.0.0/);
+my @parts = split / /, $ipas;
+$count++;
+print "Got DNS set: $ipas\n";
+push @{$result{$parts[0]}}, $parts[1];
+}
+server_to_api($ip,22,$username,$password,2525);
+# we need to capture the ip/dns configuration and return it to frontend by json, then frontend can parse it and add servers to it's system
+my $json = encode_json(\%result);
+print "JSON: $json\n";
+exit(0);
+} else {
+    print "Unable to connect to $username\@$ip: $res\n";
+  }
+
+
+}
+
+
+# ip user password <domains for dnses>
+if (defined($ARGV[0]) && defined($ARGV[1]) && defined($ARGV[2])) {
+$force_install = 1;
+$ARGV[1] = 'root' if ($ARGV[1] eq "admin");
+# gather dns domains to one array
+my @domains;
+for ( my $i = 3 ; $i <= $#ARGV ; $i++ ) {
+if (defined($ARGV[$i])) {
+push(@domains,$ARGV[$i]);
+}
+}
+new_pmta($ARGV[0],$ARGV[1],$ARGV[2],@domains);
+} else {
+print "PowerMTA Server preparation script!\n";
+print "Please use $0 <ip> <user> <password> \@domains\n";
+}

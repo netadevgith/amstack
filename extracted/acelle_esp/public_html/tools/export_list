@@ -1,0 +1,64 @@
+#!/usr/bin/perl -w
+# export openers/clickers script
+use strict;
+use warnings;
+use DBI;
+use Redis;
+use Data::Dumper;
+use JSON::XS;
+use POSIX;
+use File::Basename;
+my $outfile = "fi_was.txt";
+my $mail_list_id = 93;
+
+my %env; # variable to put laravel settings in
+my $dbh;
+my %settings = ();
+ my $script_dir = undef;
+  if(-l __FILE__) {
+    $script_dir = dirname(readlink(__FILE__));
+  }
+  else {
+    $script_dir = dirname(__FILE__);
+  }
+my $outas;
+sysopen($outas, $script_dir."/".$outfile, O_APPEND | O_CREAT | O_RDWR) or die;
+$outas->autoflush(1);
+
+
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:database=".$env{DB_DATABASE}.";host=".$env{DB_HOST}.";port=".$env{DB_PORT}, $env{DB_USERNAME}, $env{DB_PASSWORD},{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+
+read_lavonelis();
+dbconn();
+
+
+my $sth = $dbh->prepare("select email from subscribers where mail_list_id like ?");
+$sth->execute($mail_list_id);
+my $rows = $sth->rows;
+my $subscribers = $sth->fetchall_arrayref({});
+my $cnt = 0;
+for my $subscriber (@$subscribers) {
+$cnt++;
+print "Processing export $cnt of $rows\r";
+printf $outas $subscriber->{email}."\n";
+}
+print "\nExport done!\n";

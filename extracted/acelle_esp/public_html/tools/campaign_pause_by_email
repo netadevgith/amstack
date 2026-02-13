@@ -1,0 +1,52 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+use DBI;
+use Redis;
+my $dbh;
+my %env; # variable to put laravel settings in
+my %settings = ();
+
+
+sub campaign_pause {
+my ($email) = @_;
+my $sth = $dbh->prepare("select campaigns.uid from subscribers inner join campaigns_lists_segments on subscribers.mail_list_id = campaigns_lists_segments.mail_list_id inner join campaigns on campaigns_lists_segments.campaign_id = campaigns.id where subscribers.email = ?");
+$sth->execute($email);
+my $campaigns = $sth->fetchall_arrayref({});
+for my $camp (@$campaigns) {
+print "Campaign: $camp->{uid}\n";
+my $redis = Redis->new(server => '127.0.0.1:6379', reconnect => 60);
+# jeigu egzistuoja keywordas
+if ($redis->exists($camp->{uid}."_paused")) {
+$redis->del($camp->{uid}."_paused");
+}
+$redis->set($camp->{uid}."_paused","Is backend, pagautas del hardbounce $email");
+}
+}
+
+
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+read_lavonelis();
+dbconn();
+
+campaign_pause("a.mahlamaki\@netikka.fi");

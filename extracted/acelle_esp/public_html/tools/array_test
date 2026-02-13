@@ -1,0 +1,31 @@
+#!/usr/bin/perl -w
+
+use Data::Dumper;
+my %new_providers = ();
+
+# suimportuojam
+$new_providers{"gmail.com"} = 3;
+# dar suimportuojam 1
+$new_providers{"gmail.com"}++;
+$new_providers{"yahoo.com"}++;
+$new_providers{"res.lt"} = 100000;
+# istrinam 
+#delete($new_providers{"gmail.com"});
+# searchnas
+
+print "Priimportavo ".$new_providers{"gmail.com"}."\n";
+my $num_elements = scalar(keys(%new_providers));
+print "array turi: $num_elements elementus\n";
+#print "visi: ".Dumper(\%new_providers);
+print "foreachas per visus: \n";
+foreach my $word ( keys %new_providers )
+{
+  print "$word : $new_providers{$word}\n";
+}
+# searchas ar egzistuoja yahoo.com
+if (exists $new_providers{'res.lt'}) {
+    print "Found!\n";
+}
+if (!exists $new_providers{'res.lt'}) {
+print "Ok nera\n";
+}

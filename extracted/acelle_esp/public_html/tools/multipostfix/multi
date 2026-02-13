@@ -1,0 +1,47 @@
+#!/usr/bin/perl -w
+# apt-get install libfile-slurp-perl
+use strict;
+use warnings;
+use File::Copy qw(copy);
+use File::Slurp qw(read_file write_file);
+my $post_min = 1;
+use File::Basename;
+my $scriptdir = undef;
+$scriptdir = dirname($0);
+my $filename = $scriptdir.'/ip_addr';
+sub build_postfix {
+my ($ip,$reverse) = @_;
+print "Building postfix configuration files with: ";
+print "IP: $ip ";
+print "rDNS: $reverse\n";
+print "Creating postfix instance\n";
+system("postmulti -i postfix-$post_min -p stop");
+system("postmulti -I postfix-$post_min -e create");
+#print "Creating directory: /etc/postfix-$post_min\n";
+#mkdir "/etc/postfix-$post_min";
+#mkdir "/var/spool/postfix-$post_min";
+print "Copying files...\n";
+copy $scriptdir."/tpl/master.cf","/etc/postfix-$post_min/master.cf";
+#mkdir "/var/spool/postfix-$post_min/etc/";
+system("cp -r /var/spool/postfix/etc /var/spool/postfix-$post_min/");
+system("cp /etc/postfix/dynamicmaps.cf /etc/postfix-$post_min/dynamicmaps.cf");
+my $data = read_file $scriptdir."/tpl/main.cf", {binmode => ':utf8'};
+$data =~ s/{NR}/$post_min/g;
+$data =~ s/{IP}/$ip/g;
+$data =~ s/{DNS}/$reverse/g;
+write_file "/etc/postfix-$post_min/main.cf", {binmode => ':utf8'}, $data;
+print "Registering new postfix instance...\n";
+system("postmulti -i postfix-$post_min -e enable");
+system("postmulti -i postfix-$post_min -p start");
+$post_min++;
+}
+sub start_build {
+open(my $fh, '<:encoding(UTF-8)', $filename) or die "Could not open file '$filename' $!";
+    while (my $row = <$fh>) {
+      chomp $row;
+     my @words = split / /, $row; # SPLIT " - " 
+     build_postfix($words[0],$words[1]); 
+    }
+}
+start_build();
+

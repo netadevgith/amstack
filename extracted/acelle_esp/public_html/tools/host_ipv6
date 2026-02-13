@@ -1,0 +1,98 @@
+#!/usr/bin/perl -w
+
+use DBI;
+use strict;
+use warnings;
+use Getopt::Long;
+use POSIX;
+use File::Basename;
+ my $script_dir = undef;
+  if(-l __FILE__) {
+    $script_dir = dirname(readlink(__FILE__));
+  }
+  else {
+    $script_dir = dirname(__FILE__);
+  }
+my $log_file = $script_dir."/host_ipv6.log";
+my $outfile = "ipv6_readydomains.txt";
+my %env; # variable to put laravel settings in
+my $dbh;
+my $outas;
+sysopen($outas, $script_dir."/".$outfile, O_APPEND | O_CREAT | O_RDWR) or die;
+$outas->autoflush(1);
+
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"|| do { write_log("Unable to read laravel environment file, exiting..."); die "Neatidarau lavonelio aplinkos failo :(\n"; };
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:database=".$env{DB_DATABASE}.";host=".$env{DB_HOST}.";port=".$env{DB_PORT}, $env{DB_USERNAME}, $env{DB_PASSWORD},{ PrintError => 1, RaiseError => 0 }) or do {
+write_log("Unable to connect to MySQL, we could not update the campaign status, if it finished or no\n");
+die "Unable to connect to MySQL\n"; };
+}
+
+sub getHostIPv6 {
+my ($hostName) = @_;
+#    my $hostName = Net::Domain::hostfqdn();
+    my $ip;
+    my @rawIpData;
+#    print "Found $hostName\n";
+        @rawIpData = `host -avt AAAA $hostName`;
+    foreach my $line (@rawIpData)
+    {
+    if ($line =~ m/^.*IN.*AAAA(?<ipv6>.*)/)
+    {
+        $ip = $1;
+        $ip =~ s/^\s+//;
+        chomp($ip);
+    }
+    }
+    if (!defined($ip)|| $ip eq "")
+    {
+    print "Did not find an IPv6 address on the $hostName\n";
+    #exit(1);
+    return;
+    }
+        print "Found IP: $ip\n";
+        printf $outas "Domain: $hostName IPv6: $ip\n";
+    return;
+}
+
+if (defined($ARGV[0])&&$ARGV[0] eq "mysql") {
+read_lavonelis();
+dbconn();
+print "Doing MySQL select from subscribers and populating the domain data...\n";
+my $SQL = 'SELECT substr(email,INSTR(email,"@")+1) as domain,count(substr(email,INSTR(email,"@"))) as count from subscribers group by domain';
+my $sth = $dbh->prepare($SQL);
+$sth->execute();
+my $rows = $sth->rows;
+my $domains = $sth->fetchall_arrayref({});
+my $cnt = 0;
+for my $domain (@$domains) {
+$cnt++;
+print "We got $domain->{domain} with count $domain->{count}\n";
+getHostIPv6($domain->{domain});
+}
+print "All IPv6 capable domains are saved in $outfile\n";
+
+} else {
+if (defined($ARGV[0])) {
+getHostIPv6($ARGV[0]);
+} else {
+print "No host specified";
+}
+}
+
+

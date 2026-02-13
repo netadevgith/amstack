@@ -1,0 +1,63 @@
+#!/usr/bin/perl -w
+# Recover redis statistics from mysql
+# when redis is fucked up then the only way is to use this script to recover the statistics
+# remember to launch open parts import script after redis crash too
+use strict;
+use warnings;
+use DBI;
+use Redis;
+use Data::Dumper;
+use JSON::XS;
+my $dbh;
+my %env; # variable to put laravel settings in
+my %settings = ();
+
+
+sub recover_campaigns {
+my ($uid) = @_;
+my $sth = $dbh->prepare("select uid, name, cache from campaigns");
+$sth->execute();
+my $redis = Redis->new(server => '127.0.0.1:6379', reconnect => 60);
+my $campaigns = $sth->fetchall_arrayref({});
+for my $camp (@$campaigns) {
+# jeigu egzistuoja keywordas
+if (!$redis->exists($camp->{uid})) {
+my ($clicks) = $dbh->selectrow_array("select count(DISTINCT click_logs.message_id) as countas from campaigns inner join tracking_logs on campaigns.id = tracking_logs.campaign_id inner join click_logs on tracking_logs.message_id = click_logs.message_id where campaigns.uid = '".$camp->{uid}."'");
+my ($opens) = $dbh->selectrow_array("select count(DISTINCT open_logs.message_id) as countas from campaigns inner join tracking_logs on campaigns.id = tracking_logs.campaign_id inner join open_logs on tracking_logs.message_id = open_logs.message_id where campaigns.uid = '".$camp->{uid}."'");
+my $json = decode_json($camp->{cache});
+my $total = $json->{SubscriberCount};
+#print Dumper($json);
+print "Fixing campaign $camp->{name} Total subscribers: $total openers: $opens clickers: $clicks\n"; 
+$redis->set($camp->{uid}."_total",$total);
+$redis->set($camp->{uid}."_counter",$total);
+$redis->set($camp->{uid}."_clickers",$clicks);
+$redis->set($camp->{uid}."_openers",$opens);
+} else {
+print "Campaign: $camp->{name} seems to have redis information set already!\n";
+}
+}
+}
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+read_lavonelis();
+dbconn();
+
+recover_campaigns();

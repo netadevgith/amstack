@@ -1,0 +1,762 @@
+############################################################################
+### https://salimreza.ml
+### LEARN TO INSTALL POWERMTA HERE 
+### https://salimreza.ml/install-configure-powermta-centos-8-ip-rotation-with-config-file
+############################################################################
+
+############################################################################
+# START EDITING HERE
+# 1. REPLACE trrruisllt.click WITH YOUR DOMAIN NAME (BETTER USE SEARCH AND REPLACE)
+# 2. UPDATE IP ADDRESS 
+# 3. THAT'S IT
+############################################################################
+
+postmaster abuse@kx42.belmnr.net
+#smtp-port 25
+smtp-listener 143.198.205.69:2525
+<source 0/0>
+	log-connections yes
+	log-commands    yes      # WARNING: verbose!
+  allow-unencrypted-plain-auth yes
+allow-smtputf8 no
+</source>
+sync-msg-create false
+sync-msg-update false
+run-as-root no
+log-file /var/log/pmta/log        # logrotate is used for rotation
+
+<acct-file /var/log/pmta/acct.csv>
+#    move-to /opt/myapp/pmta-acct   # configure as fit for your application
+#    move-interval 5m
+
+    max-size 50M
+</acct-file>
+
+# transient errors (soft bounces)
+<acct-file /var/log/pmta/diag.csv>
+  move-interval 1d
+  delete-after never
+  records t
+</acct-file>
+
+#
+# spool directories
+#
+
+spool /var/spool/pmta
+
+http-mgmt-port 1983
+http-access 127.0.0.1 admin
+http-access 0/0 monitor
+
+############################################################################
+# END: OTHER OPTIONS
+############################################################################
+
+############################################################################
+### https://salimreza.ml
+### LEARN TO INSTALL POWERMTA HERE 
+### https://salimreza.ml/install-configure-powermta-centos-8-ip-rotation-with-config-file
+############################################################################
+
+################################################ ############################
+# BEGIN: USERS/VIRTUAL-MTA / VIRTUAL-MTA-POOL /  VIRTUAL-PMTA-PATTERN
+################################################ ############################
+#<spool /var/spool/pmta>
+#</spool>
+<smtp-user usr>
+	password 1235asdf421
+	source {pmta-auth}
+</smtp-user>
+<source {pmta-auth}>
+	smtp-service yes
+	always-allow-relaying yes
+	require-auth true
+	process-x-virtual-mta yes
+	default-virtual-mta pmta-pool
+	remove-received-headers true
+	add-received-header false
+	hide-message-source true
+</source>
+
+#BEGIN VIRTUAL MTAS 
+<virtual-mta pmta-vmta0>
+smtp-source-host 143.198.205.69 kx42.belmnr.net
+#domain-key dkim,*,/home/admin/conf/mail/trrruisllt.click/dkim.pem
+#domain-key default,*,/var/cpanel/domain_keys/private/trrruisllt.click 
+<domain *>
+max-cold-virtual-mta-msg 400/day
+max-msg-rate 1000/h
+</domain>
+</virtual-mta> 
+#END VIRTUAL MTAS
+
+
+<virtual-mta-pool pmta-pool>
+virtual-mta pmta-vmta0
+</virtual-mta-pool>
+################################################ ############################
+# END: USERS/VIRTUAL-MTA / VIRTUAL-MTA-POOL /  VIRTUAL-PMTA-PATTERN
+################################################ ############################
+<source 127.0.0.1>
+    always-allow-api-submission yes
+    add-message-id-header yes
+    retain-x-job yes
+    retain-x-virtual-mta yes
+    verp-default yes
+    process-x-envid yes
+    process-x-job yes
+    jobid-header X-Mailer-RecptId
+    process-x-virtual-mta yes
+</source>
+
+#<domain trrruisllt.click>
+#route [127.0.0.1]:20
+#</domain>
+
+
+############################################################################
+### https://salimreza.ml
+### LEARN TO INSTALL POWERMTA HERE 
+### https://salimreza.ml/install-configure-powermta-centos-8-ip-rotation-with-config-file
+############################################################################
+
+############################################################################
+# BEGIN: BACKOFF RULES
+
+#N: ISP rules
+############################################################################
+# domains that resolve to mx?.hotmail.com
+domain-macro hotmail hotmail.com,msn.com,hotmail.co.uk,hotmail.fr,live.com,hotmail.it,hotmail.de,email.msn.com,email.hotmail.com,email.msn.com,hotmail.com,live.com,msn.com,webtv.com,webtv.net
+<domain $hotmail>
+    max-smtp-out 1 # prevent "exceeded the connection limit"
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+</domain>
+
+# domains that resolve to ?.mx.mail.yahoo.com
+domain-macro yahoo yahoo.com,yahoo.ca,rocketmail.com,ymail.com,yahoo.com.au,geocities.com,yahoo.com.mx,yahoo.com.br,altavista.com,ameritech.net,att.net,bellsouth.net,attbroadband.com,attcanada.net,attglobal.com,attglobal.net,attnet.com,attworldnet.com,bellatlantic.net,bellatlantic.net,bellsouth.com,bellsouth.net,flash.net,netzero.net,nvbell.net,pacbell.net,prodigy.com,prodigy.net,sbcglobal.net,sbcglobal.net,snet.net,swbell.com,swbell.net,toast.net,usa.net,verizon.com,verizon.net,verizonmail.com,vzwpix.com,wans.net,worldnet.att.net,yahoo.net
+
+<domain $yahoo>
+    max-msg-per-connection 2 # yahoo policy
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+</domain>
+
+# domains that resolve to mailin-0?.mx.aol.com
+domain-macro aol aol.com,aim.com,aim.net,cs.com,netscape.com,wmconnect.net,netscape.net,cs.com,mail.com,wmconnect.com,icqmail.com,email.com,usa.com
+<domain $aol>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+</domain>
+
+# domains that resolve to (alt?.)gmail-smtp-in.l.google.com
+domain-macro gmail gmail.com,googlemail.com
+<domain $gmail>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+</domain>
+# http://feedback.comcast.net/
+ <domain comcast.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+# Ameritrade, Amitrade
+ <domain tdameritrade.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Ameritrade, Amitrade
+ <domain ameritrade.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+ # Broadband
+ <domain charterinternet.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Broadband
+ <domain comcast.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Broadband
+ <domain comcast.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+
+# Broadband
+ <domain comcastwork.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Broadband
+ <domain cox.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Broadband
+ <domain cox.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Broadband
+ <domain coxinternet.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Broadband
+ <domain cox-internet.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Broadband
+ <domain suddenlink.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+# Broadband
+ <domain windjammer.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain centurylink.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain centurylink.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain centurytel.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain centurytel.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain cswnet.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain emadisonriver.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain emadisonriver.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain embarq.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain embarq.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain embarqmail.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain grics.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain gulftel.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain mebtel.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain qwest.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain uswest.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain uswest.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain swestmail.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Century Link
+ <domain uswestmail.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Cincinnati Bell
+ <domain fuse.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Cincinnati Bell
+ <domain fuse.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Cincinnati Bell
+ <domain zoomnet.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Cincinnati Bell
+ <domain zoomtown.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Cincinnati Bell
+ <domain zoomtown.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Earthlink
+ <domain earthlink.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Earthlink
+ <domain earthlink.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Earthlink
+ <domain mindspring.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Earthlink
+ <domain netcom.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Godaddy
+ <domain Inbox.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Godaddy
+ <domain outblaze.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Iwon
+ <domain excite.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Iwon
+ <domain iwon.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Lycos
+ <domain angelfire.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Lycos
+ <domain lycos.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Lycos
+ <domain lycosmail.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Lycos
+ <domain mailcity.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Sprint
+ <domain sprintpcs.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Time Warner
+ <domain rr.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Time Warner
+ <domain adelphia.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Time Warner
+ <domain adelphia.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Time Warner
+ <domain insightbb.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Time Warner
+ <domain roadrunner.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Time Warner
+ <domain roadrunner.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# Tmobile
+ <domain tmomail.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# United Internet
+ <domain gmx.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# United Internet
+ <domain mail.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# United Online
+ <domain juno.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# United Online
+ <domain netzero.com>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# United Online
+ <domain unitedonline.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+# United XO
+ <domain concentric.net>
+    max-msg-rate 250/h # prevent "exceeded the rate limit"
+ </domain>
+
+ <domain *>
+        use-starttls yes
+        require-starttls no
+ </domain>
+############################################################################
+# BEGIN: BACKOFF RULES
+#<pattern-list myList>
+#mail-from /admin@nicholashillmail.com/ virtual-mta=pmta-vmta19
+#header from /admin@nicholashillmail.com/ virtual-mta=pmta-vmta19
+#mail-from /admin@mx2.nicholashill.eu/ virtual-mta=pmta-vmta3
+#header from /admin@mx2.nicholashill.eu/ virtual-mta=pmta-vmta3
+#mail-from /admin@mx3.nicholashill.eu/ virtual-mta=pmta-vmta4
+#header from /admin@mx3.nicholashill.eu/ virtual-mta=pmta-vmta4
+#mail-from /admin@mx4.nicholashill.eu/ virtual-mta=pmta-vmta5
+#header from /admin@mx4.nicholashill.eu/ virtual-mta=pmta-vmta5
+#mail-from /admin@mx5.nicholashill.eu/ virtual-mta=pmta-vmta6
+#header from /admin@mx5.nicholashill.eu/ virtual-mta=pmta-vmta6
+#mail-from /admin@mx6.nicholashillmail.com/ virtual-mta=pmta-vmta7
+#header from /admin@mx6.nicholashillmail.com/ virtual-mta=pmta-vmta7
+#mail-from /admin@mx5.nicholashillmail.com/ virtual-mta=pmta-vmta8
+#header from /admin@mx5.nicholashillmail.com/ virtual-mta=pmta-vmta8
+#mail-from /admin@mx4.nicholashillmail.com/ virtual-mta=pmta-vmta9
+#header from /admin@mx4.nicholashillmail.com/ virtual-mta=pmta-vmta9
+#mail-from /admin@mx3.nicholashillmail.com/ virtual-mta=pmta-vmta10
+#header from /admin@mx3.nicholashillmail.com/ virtual-mta=pmta-vmta10
+#mail-from /admin@mx2.nicholashillmail.com/ virtual-mta=pmta-vmta11
+#header from /admin@mx2.nicholashillmail.com/ virtual-mta=pmta-vmta11
+#mail-from /admin@mx1.nicholashillmail.com/ virtual-mta=pmta-vmta12
+#header from /admin@mx1.nicholashillmail.com/ virtual-mta=pmta-vmta12
+#mail-from /admin@mx5.nicholashillnews.com/ virtual-mta=pmta-vmta13
+#header from /admin@mx5.nicholashillnews.com/ virtual-mta=pmta-vmta13
+#mail-from /admin@mx4.nicholashillnews.com/ virtual-mta=pmta-vmta14
+#header from /admin@mx4.nicholashillnews.com/ virtual-mta=pmta-vmta14
+#mail-from /admin@mx3.nicholashillnews.com/ virtual-mta=pmta-vmta15
+#header from /admin@mx3.nicholashillnews.com/ virtual-mta=pmta-vmta15
+#mail-from /admin@mx2.nicholashillnews.com/ virtual-mta=pmta-vmta16
+#header from /admin@mx2.nicholashillnews.com/ virtual-mta=pmta-vmta16
+#mail-from /admin@mx1.nicholashillnews.com/ virtual-mta=pmta-vmta17
+#header from /admin@mx1.nicholashillnews.com/ virtual-mta=pmta-vmta17
+#mail-from /admin@nicholashillnews.com/ virtual-mta=pmta-vmta18
+#header from /admin@nicholashillnews.com/ virtual-mta=pmta-vmta18
+#mail-from /admin@nicholashill.eu/ virtual-mta=pmta-vmta1
+#header from /admin@nicholashill.eu/ virtual-mta=pmta-vmta1
+#mail-from /admin@mx1.nicholashill.eu/ virtual-mta=pmta-vmta2
+#header from /admin@mx1.nicholashill.eu/ virtual-mta=pmta-vmta2
+#</pattern-list>
+
+
+#<source 127.0.0.1>
+#pattern-list myList # this selects the pattern list for messages
+#always-allow-relaying yes
+#</source>
+
+#<pattern-list myList>
+#header from /admin@mx3.nicholashillmail.com/ virtual-mta=pmta-vmta10
+#mail-from /admin@mx3.nicholashillmail.com/ virtual-mta=pmta-vmta10
+#header from /admin@mx4.nicholashillmail.com/ virtual-mta=pmta-vmta9
+#mail-from /admin@mx4.nicholashillmail.com/ virtual-mta=pmta-vmta9
+#</pattern-list>
+#<source 127.0.0.1>
+#pattern-list myList # this selects the pattern list for messages
+#</source>
+
+# default domain settings
+<domain *>
+    max-smtp-out 2 # default be nice on concurrent connections
+    max-msg-per-connection 100 # max 500 mails in one session
+    max-errors-per-connection 10 # avoid 'too long without data command' error
+    max-msg-rate 1000/h
+	smtp-greeting-timeout 5m
+    bounce-upon-no-mx yes # proper mail domains should have mx
+    assume-delivery-upon-data-termination-timeout yes # avoid duplicate deliveries
+    retry-after 10m # typical greylisting period
+    bounce-after 24h # default 4d12h
+    smtp-pattern-list blocking-errors
+    backoff-max-msg-rate 1/m # send only regular tries during backoff (default unlimited)
+    backoff-retry-after 20m # retry at least every 20m (default 1h)
+    backoff-notify "" # disable backoff notifications
+    backoff-to-normal-after-delivery yes # revert to normal asap (default no)
+    backoff-to-normal-after 1h # always revert to normal after 1h (default never)
+    dkim-sign yes
+	ignore-8bitmime true
+    use-starttls yes
+</domain>
+
+############################################################################
+# END: ISP rules
+############################################################################
+
+############################################################################
+
+<smtp-pattern-list common-errors>
+  reply /generating high volumes of.* complaints from AOL/    mode=backoff
+  reply /Excessive unknown recipients - possible Open Relay/  mode=backoff
+  reply /^421 .* too many errors/                             mode=backoff
+  reply /blocked.*spamhaus/                                   mode=backoff
+  reply /451 Rejected/                                        mode=backoff
+</smtp-pattern-list>
+
+<smtp-pattern-list blocking-errors>
+    #
+    # A QUEUE IN BACKOFF MODE WILL SEND MORE SLOWLY
+    # To place a queue back into normal mode, a command similar
+    # to one of the following will need to be run:
+    # pmta set queue --mode=normal yahoo.com
+    # or
+    # pmta set queue --mode=normal yahoo.com/vmta1
+    #
+    # To use backoff mode, uncomment individual <domain> directives
+    #
+    #AOL Errors
+    reply /421 .* SERVICE NOT AVAILABLE/ mode=backoff
+    reply /generating high volumes of.* complaints from AOL/ mode=backoff
+    reply /554 .*aol.com/ mode=backoff
+    reply /421dynt1/ mode=backoff
+    reply /HVU:B1/ mode=backoff
+    reply /DNS:NR/ mode=backoff
+    reply /RLY:NW/ mode=backoff
+    reply /DYN:T1/ mode=backoff
+    reply /RLY:BD/ mode=backoff
+    reply /RLY:CH2/ mode=backoff
+    #
+    #Yahoo Errors
+    reply /421 .* Please try again later/ mode=backoff
+    reply /421 Message temporarily deferred/ mode=backoff
+    reply /VS3-IP5 Excessive unknown recipients/ mode=backoff
+    reply /VSS-IP Excessive unknown recipients/ mode=backoff
+    #
+    # The following 4 Yahoo errors may be very common
+    # Using them may result in high use of backoff mode
+    #
+    reply /\[GL01\] Message from/ mode=backoff
+    reply /\[TS01\] Messages from/ mode=backoff
+    reply /\[TS02\] Messages from/ mode=backoff
+    reply /\[TS03\] All messages from/ mode=backoff
+    #
+    #Hotmail Errors
+    reply /exceeded the rate limit/ mode=backoff
+    reply /exceeded the connection limit/ mode=backoff
+    reply /Mail rejected by Windows Live Hotmail for policy reasons/ mode=backoff
+    reply /mail.live.com\/mail\/troubleshooting.aspx/ mode=backoff
+    #
+    #Adelphia Errors
+    reply /421 Message Rejected/ mode=backoff
+    reply /Client host rejected/ mode=backoff
+    reply /blocked using UCEProtect/ mode=backoff
+    #
+    #Road Runner Errors
+    reply /Mail Refused/ mode=backoff
+    reply /421 Exceeded allowable connection time/ mode=backoff
+    reply /amIBlockedByRR/ mode=backoff
+    reply /block-lookup/ mode=backoff
+    reply /Too many concurrent connections from source IP/ mode=backoff
+    #
+    #General Errors
+    reply /too many/ mode=backoff
+    reply /Exceeded allowable connection time/ mode=backoff
+    reply /Connection rate limit exceeded/ mode=backoff
+    reply /refused your connection/ mode=backoff
+    reply /try again later/ mode=backoff
+    reply /try later/ mode=backoff
+    reply /550 RBL/ mode=backoff
+    reply /TDC internal RBL/ mode=backoff
+    reply /connection refused/ mode=backoff
+    reply /please see www.spamhaus.org/ mode=backoff
+    reply /Message Rejected/ mode=backoff
+    reply /refused by antispam/ mode=backoff
+    reply /Service not available/ mode=backoff
+    reply /currently blocked/ mode=backoff
+    reply /locally blacklisted/ mode=backoff
+    reply /not currently accepting mail from your ip/ mode=backoff
+    reply /421.*closing connection/ mode=backoff
+    reply /421.*Lost connection/ mode=backoff
+    reply /476 connections from your host are denied/ mode=backoff
+    reply /421 Connection cannot be established/ mode=backoff
+    reply /421 temporary envelope failure/ mode=backoff
+    reply /421 4.4.2 Timeout while waiting for command/ mode=backoff
+    reply /450 Requested action aborted/ mode=backoff
+    reply /550 Access denied/ mode=backoff
+    reply /exceeded the rate limit/ mode=backoff  # hotmail rate limit
+	  reply /421rlynw/ mode=backoff  # aol rate limit
+	  reply /permanently deferred/ mode=backoff  # yahoo
+	  reply /\d+\.\d+\.\d+\.\d+ blocked/ mode=backoff  # at&t, cox
+	  reply /generating high volumes of.* complaints from AOL/    mode=backoff
+	  reply /Excessive unknown recipients - possible Open Relay/  mode=backoff
+	  reply /^421 .* too many errors/                             mode=backoff
+	  reply /blocked.*spamhaus/                                   mode=backoff
+	  reply /451 Rejected/                                        mode=backoff
+</smtp-pattern-list>
+
+############################################################################
+# END: BACKOFF RULES
+############################################################################
+
+
+############################################################################
+# BEGIN: BOUNCE RULES
+############################################################################
+
+<bounce-category-patterns>
+    /spam/ spam-related
+    /junk mail/ spam-related
+    /blacklist/ spam-related
+    /blocked/ spam-related
+    /\bU\.?C\.?E\.?\b/ spam-related
+    /\bAdv(ertisements?)?\b/ spam-related
+    /unsolicited/ spam-related
+    /\b(open)?RBL\b/ spam-related
+    /realtime blackhole/ spam-related
+    /http:\/\/basic.wirehub.nl\/blackholes.html/ spam-related
+    /\bvirus\b/ virus-related
+    /message +content/ content-related
+    /content +rejected/ content-related
+    /quota/ quota-issues
+    /limit exceeded/ quota-issues
+    /mailbox +(is +)?full/ quota-issues
+    /sender ((verify|verification) failed|could not be verified|address rejected|domain must exist)/ invalid-sender
+    /unable to verify sender/ invalid-sender
+    /requires valid sender domain/ invalid-sender
+    /bad sender's system address/ invalid-sender
+    /No MX for envelope sender domain/ invalid-sender
+    /^[45]\.4\.4/ routing-errors
+    /no mail hosts for domain/ invalid-sender
+    /Your domain has no(t)? DNS\/MX entries/ invalid-sender
+    /REQUESTED ACTION NOT TAKEN: DNS FAILURE/ invalid-sender
+    /Domain of sender address/ invalid-sender
+    /return MX does not exist/ invalid-sender
+    /Invalid sender domain/ invalid-sender
+    /Verification failed/ invalid-sender
+    /\bstorage\b/ quota-issues
+    /(user|mailbox|recipient|rcpt|local part|address|account|mail drop|ad(d?)ressee)
+    (has|has been|is)? *(currently|temporarily+)?(disabled|expired|inactive|not activated)
+    / inactive-mailbox
+    /(conta|usu.rio) inativ(a|o)
+    / inactive-mailbox
+    /Too many (bad|invalid|unknown|illegal|unavailable) (user|mailbox|recipient|rcpt|local part|address|account|mail drop|ad(d?)ressee)/other
+    /(No such|bad|invalid|unknown|illegal|unavailable) (local +)?(user|mailbox|recipient|rcpt|local part|address|account|mail drop|ad(d?)ressee)
+    / bad-mailbox
+    /(user|mailbox|recipient|rcpt|local part|address|account|mail drop|ad(d?)ressee) +(\S+@\S+ +)?(not (a +)?valid|not known|not here|not
+    found|does not exist|bad|invalid|unknown|illegal|unavailable)/ bad-mailbox
+    /\S+@\S+ +(is +)?(not (a +)?valid|not known|not here|not found|does not exist|bad|invalid|unknown|illegal|unavailable)/ bad-mailbox
+    /no mailbox here by that name/ bad-mailbox
+    /my badrcptto list/ bad-mailbox
+    /not our customer/ bad-mailbox
+    /no longer (valid|available)/ bad-mailbox
+    /have a \S+ account/ bad-mailbox
+    /\brelay(ing)?/ relaying-issues
+    /domain (retired|bad|invalid|unknown|illegal|unavailable)/ bad-domain
+    /domain no longer in use/ bad-domain
+    /domain (\S+ +)?(is +)?obsolete/ bad-domain
+    /denied/ policy-related
+    /prohibit/ policy-related
+    /refused/ policy-related
+    /allowed/ policy-related
+    /banned/ policy-related
+    /policy/ policy-related
+    /suspicious activity/ policy-related
+    /bad sequence/ protocol-errors
+    /syntax error/ protocol-errors
+    /\broute\b/ routing-errors
+    /\bunroutable\b/ routing-errors
+    /\bunrouteable\b/ routing-errors
+#additions by krish
+    /Recipient address rejected/ invalid-mailbox
+    /DYN:T1/ ploicy-related
+    /Service unavailable/ ploicy-related
+    /DNSBL/ spam-related
+    /ccount has been disabled or discontinued/ bad-mailbox
+    /oo many recip/ policy-related
+    /no valid recipie/ invalid-mailbox
+    /Account Inactive/ invalid-mailbox
+    /service provider since part of their network is on our block list/ spam-related
+
+    /Invalid 7bit DATA/ content-related
+    /^2.\d+.\d+;/ success
+    /^[45]\.1\.[1346];/ bad-mailbox
+    /^[45]\.1\.2/ bad-domain
+    /^[45]\.1\.[78];/ invalid-sender
+    /^[45]\.2\.0;/ bad-mailbox
+    /^[45]\.2\.1;/ inactive-mailbox
+    /^[45]\.2\.2;/ quota-issues
+    /^[45]\.3\.3;/ content-related
+    /^[45]\.3\.5;/ bad-configuration
+    /^[45]\.4\.1;/ no-answer-from-host
+    /^[45]\.4\.2;/ bad-connection
+    /^[45]\.4\.[36];/ routing-errors
+    /^[45]\.4\.7;/ message-expired
+    /^[45]\.5\.3;/ policy-related
+    /^[45]\.5\.\d+;/ protocol-errors
+    /^[45]\.6\.\d+;/ content-related
+    /^[45]\.7\.[012];/ policy-related
+    /^[45]\.7\.7;/ content-related
+    // other    # catch-all
+</bounce-category-patterns>
+
+
+############################################################################
+# END: BOUNCE RULES
+############################################################################
+

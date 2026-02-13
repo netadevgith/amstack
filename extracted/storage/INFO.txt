@@ -1,0 +1,13 @@
+latest extracted data is in stage2.tar.gz archive
+
+Implemented http return codes
+https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
+Should be similar with
+https://restfulapi.net/http-status-codes/
+
+--- http statuses ---
+200 - OK (resource was found) - True
+204 - No Content (resource was not found) - False
+403 - Forbidden (no access authorized)
+404 - Not found
+400 - Bad request

@@ -1,0 +1,26 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+
+if (!defined $ARGV[0]) {
+print "A file with DNS entries layout: IP - DNS - POSTFIX-NR, must be specified!\n";
+exit 1;
+}
+
+sub check_dns {
+my ($dns) = @_;
+#print "Checking DNS entry: $dns ..\n";
+my $outas = `host $dns`;
+chomp($outas);
+print "$outas\n";
+}
+
+my $postfixes = $ARGV[0];
+
+open(my $fh, '<:encoding(UTF-8)', $postfixes) or die "Could not open file '$postfixes' $!";
+    while (my $row = <$fh>) {
+      chomp $row;
+     my @words = split / - /, $row; # SPLIT " - "
+     check_dns($words[1]); 
+    }

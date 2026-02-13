@@ -1,0 +1,7 @@
+#!/bin/sh
+
+make
+systemctl stop storage
+cp storage /opt/storage/
+systemctl start storage
+echo "Migrated successfully!"

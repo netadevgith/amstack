@@ -1,0 +1,92 @@
+#!/usr/bin/perl -w
+# cpan Net::SSH::Perl
+my $log_file = "raportas.txt";
+
+use Net::SSH::Perl;
+use strict;
+use Term::ANSIColor 2.00 qw(:pushpop);
+use DBI;
+
+my $host = "abrosend.info";
+my $username = "root";
+my $password = "tcZvalaUJsWecLgy5jfn";
+
+my $dbhost = "127.0.0.1";
+my $dbuser = "ems";
+my $dbpass = "bGh9CaF897q";
+my $dbport = "3306";
+my $dbase = "mailsendas_atsk";
+my %env;
+my $dbh;
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+read_lavonelis();
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+dbconn();
+
+
+
+my $stdout;
+my $stderr;
+my $exit;
+my $count = 0;
+
+sub write_log {
+my ($text) = @_;
+open(my $fh, '>>', $log_file);
+print $fh "$text\n";
+close $fh;
+}
+
+open(my $fh, '<:encoding(UTF-8)', $ENV{"HOME"}."/public_html/tools/".$log_file) or die "Could not open file '$log_file' $!";
+my $query = "UPDATE subscribers SET status = 'unconfirmed' where email = ? and status = 'subscribed'";
+my $sth = $dbh->prepare($query); 
+while (my $line = <$fh>) {
+  chomp $line;
+#$sth->execute($line);
+until ( $dbh and $dbh->ping ) {
+        if ( $dbh ) {
+            $sth->execute($line);
+            last;
+        }
+        print "MySQL gone away, waiting it to come back...";
+        sleep 10; # Wait before retrying
+    }
+
+
+
+
+
+
+
+
+}
+#die;
+# unless ($dbh->ping) {
+#                        dbconn();
+#                        }
+
+#my $query = "UPDATE subscribers SET status = 'unconfirmed' where email = ? and status = 'subscribed'";
+#my $sth = $dbh->prepare($query);
+#$sth->execute($account);
+#write_log($account);
+#}
+#print "\n";
+#}
+#}

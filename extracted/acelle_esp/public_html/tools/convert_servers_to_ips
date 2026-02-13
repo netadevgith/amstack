@@ -1,0 +1,63 @@
+#!/usr/bin/perl -w
+# apt install libdata-validate-ip-perl
+# This script converts sending_servers mysql table server hostname addresses from DNS to IP
+use strict;
+use warnings;
+use DBI;
+use Socket;
+use Data::Validate::IP;
+my $dbh;
+my %env; # variable to put laravel settings in
+my %settings = ();
+
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+
+sub convert_dns {
+my ($id,$host) = @_;
+chomp($host);
+print "Checking: $host\n";
+my $validator=Data::Validate::IP->new;
+if ($validator->is_ipv4($host)) { 
+print "Host: $host seems to be already converted...\n";
+} else {
+my $addr = inet_aton($host); # WORKAROUND TO CHECK IF HOST IS VALID AT ALL
+if ($addr) {
+my $ip = inet_ntoa(inet_aton($host)); # GET THE IP ADDRESS
+print "Converted to: $ip\n";
+my $sta = $dbh->prepare("UPDATE sending_servers set host = ? where id = ?");
+$sta->execute($ip,$id);
+}
+}
+}
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+read_lavonelis();
+dbconn();
+
+
+my $sth = $dbh->prepare("select id,host,smtp_port as port from sending_servers");
+$sth->execute();
+my $count = 0;
+my $arr = $sth->fetchall_arrayref({});
+for my $server (@$arr) {
+$count++;
+convert_dns($server->{id},$server->{host});
+}

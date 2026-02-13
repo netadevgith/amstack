@@ -1,0 +1,76 @@
+#!/usr/bin/perl -w
+# batch 2.0 for postfix parser
+# SOME SETTINGS
+my $user = "root";
+my $password = "tcZvalaUJsWecLgy5jfn";
+###########################################
+
+
+
+
+my %settings = ();
+my %env; # variable to put laravel settings in
+my $dbh;
+use strict;
+use Term::ANSIColor 2.00 qw(:pushpop);
+use DBI;
+use Redis;
+use Time::localtime;
+
+
+
+if (defined($ARGV[0]) && $ARGV[0] eq "status") {
+system("ps x|grep -v grep |grep parse_postfix");
+exit 0;
+}
+
+sub cycle_servers {
+my $sth = $dbh->prepare("SELECT name, host, smtp_username, smtp_password FROM sending_servers");
+$sth->execute();
+my $arr = $sth->fetchall_arrayref({});
+for my $server (@$arr) {
+#print "Server: $server->{host}\n";
+next if ($server->{name} =~ /smtp/);
+if (defined($ARGV[0]) && $ARGV[0] eq "stop") {
+print "Stopping $server->{host} process...\n";
+system("kill \`ps aux|grep perl|grep \"$server->{host}\"|awk '{print \$2}'\` > /dev/null 2>&1");
+} else {
+print "Forking $server->{host} process in the background...\n";
+system($ENV{"HOME"}."/public_html/tools/parse_postfix \"".$server->{host}."\" $user $server->{smtp_password}&");
+}
+}
+# hardcode
+if (defined($ARGV[0]) && $ARGV[0] eq "stop") {
+system("kill \`ps aux|grep perl|grep \"185.253.62.4\"|awk '{print \$2}'\` > /dev/null 2>&1");
+system("kill \`ps aux|grep perl|grep \"185.253.63.4\"|awk '{print \$2}'\` > /dev/null 2>&1");
+} else {
+system($ENV{"HOME"}."/public_html/tools/parse_postfix 185.253.62.4 root 6BPAV4ompRSvjDe&");
+system($ENV{"HOME"}."/public_html/tools/parse_postfix 185.253.63.4 root wEbPnSu0oV19JqD&");
+}
+
+#print "ok\n";
+}
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+unlink($ENV{"HOME"}."/.ssh/known_hosts2") if (-e $ENV{"HOME"}."/.ssh/known_hosts2");
+read_lavonelis();
+dbconn();
+cycle_servers();

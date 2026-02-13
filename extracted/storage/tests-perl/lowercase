@@ -1,0 +1,7 @@
+#!/usr/bin/perl -W
+
+use strict;
+use warnings;
+my $str = "Mano Batai Buvo DU!";
+print "Lowering case of $str\n";
+print "Lowered case: ".lc($str)."\n";

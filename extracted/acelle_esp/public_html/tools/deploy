@@ -1,0 +1,74 @@
+#!/bin/bash
+
+if ! [ "`id -u`" == "0" ]; then
+echo "Must be root to run this script"
+exit 1
+fi
+
+# app
+#scp -r public_html/vendor/laravel/framework/src/Illuminate/Database/MySqlConnection.php root@app.parkagency.net:/home/app/public_html/vendor/laravel/framework/src/Illuminate/Database
+scp -r public_html/app root@app.parkagency.net:/home/app/public_html
+scp -r public_html/config root@app.parkagency.net:/home/app/public_html
+##scp -r public_html/tools/gosender root@app.parkagency.net:/home/app/public_html/tools
+###scp -r public_html/tools root@app.parkagency.net:/home/app/public_html
+scp -r public_html/resources root@app.parkagency.net:/home/app/public_html
+scp -r public_html/public/js root@app.parkagency.net:/home/app/public_html/public
+scp -r public_html/public/css root@app.parkagency.net:/home/app/public_html/public
+scp -r public_html/vendor root@app.parkagency.net:/home/app/public_html
+ssh root@app.parkagency.net "pkill taskrunner; pkill gosender"
+scp -r taskrunner root@app.parkagency.net:/home/app
+scp gosender app.parkagency.net:/home/app
+ssh root@app.parkagency.net "chown -R app:app /home/app"
+#exit 0
+# imailo
+#scp -r public_html/app root@binary.parkagency.net:/home/app/public_html
+#scp -r public_html/tools root@binary.parkagency.net:/home/app/public_html
+#scp -r public_html/resources root@shared.parkagency.net:/home/app/public_html
+#scp -r public_html/public/js root@shared.parkagency.net:/home/app/public_html/public
+#scp -r public_html/public/css root@shared.parkagency.net:/home/app/public_html/public
+#ssh root@binary.parkagency.net "chown -R app:app /home/app/public_html"
+
+
+# shared
+#scp -r public_html/app root@adsninja.parkagency.net:/home/app/public_html
+#scp -r public_html/tools root@adsninja.parkagency.net:/home/app/public_html
+#scp -r public_html/resources root@adsninja.parkagency.net:/home/app/public_html
+#scp -r public_html/public/js root@adsninja.parkagency.net:/home/app/public_html/public
+#scp -r public_html/public/css root@adsninja.parkagency.net:/home/app/public_html/public
+#ssh root@adsninja.parkagency.net "chown -R app:app /home/app/public_html"
+
+# app2
+scp -r public_html/vendor/laravel/framework/src/Illuminate/Database/MySqlConnection.php root@app2.parkagency.net:/home/app3/public_html/vendor/laravel/framework/src/Illuminate/Database
+scp -r public_html/app root@app2.parkagency.net:/home/app3/public_html
+scp -r public_html/config root@app2.parkagency.net:/home/app3/public_html
+#scp -r public_html/tools/gosender root@app2.parkagency.net:/home/app3/public_html/tools
+##scp -r public_html/tools root@app2.parkagency.net:/home/app3/public_html
+scp -r public_html/resources root@app2.parkagency.net:/home/app3/public_html
+scp -r public_html/public/js root@app2.parkagency.net:/home/app3/public_html/public
+scp -r public_html/public/css root@app2.parkagency.net:/home/app3/public_html/public
+scp -r public_html/vendor root@app2.parkagency.net:/home/app3/public_html
+ssh root@app2.parkagency.net "pkill taskrunner; pkill gosender"
+scp -r taskrunner root@app2.parkagency.net:/home/app3
+scp gosender root@app2.parkagency.net:/home/app3
+ssh root@app2.parkagency.net "chown -R app3:app3 /home/app3"
+
+# app3
+# new mysql driver updates
+#scp -r public_html/vendor/laravel/framework/src/Illuminate/Database/MySqlConnection.php root@app3.parkagency.net:/home/app2/public_html/vendor/laravel/framework/src/Illuminate/Database
+scp -r public_html/app root@app3.parkagency.net:/home/app2/public_html
+scp -r public_html/config root@app3.parkagency.net:/home/app2/public_html
+##scp -r public_html/tools/gosender root@app3.parkagency.net:/home/app2/public_html/tools
+#scp -r public_html/tools root@app3.parkagency.net:/home/app2/public_html
+scp -r public_html/resources root@app3.parkagency.net:/home/app2/public_html
+scp -r public_html/public/js root@app3.parkagency.net:/home/app2/public_html/public
+scp -r public_html/public/css root@app3.parkagency.net:/home/app2/public_html/public
+scp -r public_html/vendor root@app3.parkagency.net:/home/app2/public_html
+ssh root@app3.parkagency.net "pkill taskrunner; pkill gosender"
+scp -r taskrunner root@app3.parkagency.net:/home/app2
+scp gosender root@app3.parkagency.net:/home/app2 
+ssh root@app3.parkagency.net "chown -R app2:app2 /home/app2"
+
+
+#scp -r public_html/app root@app3.parkagency.net:/home/app2/public_html
+#scp -r public_html/tools root@app3.parkagency.net:/home/app2/public_html
+#ssh root@app3.parkagency.net "chown -R app2:app2 /home/app2/public_html"

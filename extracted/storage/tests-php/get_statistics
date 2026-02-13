@@ -1,0 +1,46 @@
+#!/usr/bin/php
+<?php
+if (isset($argv[1]) && $argv[1] == "") {
+echo "Please provide a provider for the first parameter of this script\n";
+exit;
+}
+require("settings.php");
+
+// prod
+function get_provider_stats($provider) {
+global $api, $key;
+
+$url = "http://".$api."/api/v1/statprovider/".$provider;
+echo "Opening connection to $url\n";
+$json = file_get_contents($url, false, stream_context_create([
+    'http' => [
+        'method' => 'GET',
+        'header'  => "Content-Type: application/json\nAuthorization: $key",
+    ]
+]));
+return json_decode($json);
+}
+
+function get_global_stats() {
+global $api, $key;
+
+$url = "http://".$api."/api/v1/overall/stats";
+echo "Opening connection to $url\n";
+$json = file_get_contents($url, false, stream_context_create([
+    'http' => [
+        'method' => 'GET',
+        'header'  => "Content-Type: application/json\nAuthorization: $key",
+    ]
+]));
+return json_decode($json);
+}
+
+require_once("settings.php");
+$email = $argv[1];
+echo "Testing quering for provider $email\n";
+$obj = get_provider_stats($email);
+print_r($obj);
+echo "Global stats: \n";
+$obj2 = get_global_stats();
+print_r($obj2);
+?>

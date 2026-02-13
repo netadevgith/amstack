@@ -1,0 +1,4 @@
+#!/bin/sh
+
+rm GeoLite2-City.mmdb
+wget https://github.com/P3TERX/GeoLite.mmdb/raw/download/GeoLite2-City.mmdb

@@ -1,0 +1,25 @@
+#!/usr/bin/perl -w
+
+use Redis;
+use JSON::XS;# qw(decode_json encode_json);
+use Data::Dumper;
+my $redis = Redis->new(server => '127.0.0.1:6379', reconnect => 60);
+
+
+sub make_backup {
+my ($list,$file) = @_;
+my @members = $redis->smembers($list);
+open(my $fh, '>>', $file) or die "Could not open file '$file' $!";
+foreach my $item (@members) {
+print $fh "$item\n";
+}
+close $fh;
+}
+
+
+# list name, filename
+make_backup("clickpart","click_part");
+make_backup("openpart","open_part");
+make_backup("profilepart","update_part");
+make_backup("sourcepart","source_part");
+make_backup("unsubscribepart","unsubscribe_part");

@@ -1,0 +1,270 @@
+#!/usr/bin/perl -w
+# perl -MCPAN -e "CPAN::Shell->notest('install', 'Net::SSH::Perl')"
+my $command = "tail -f /var/log/mail.log";
+my $bad_file = "raportas.txt";
+my $log_file = "parse_postfix.log";
+my %settings = ();
+my %env; # variable to put laravel settings in
+my $regexp;
+my $optiona;
+my $optionb;
+my %catched_emails = ();
+
+
+use Net::SSH::Perl;
+use strict;
+use Term::ANSIColor 2.00 qw(:pushpop);
+use DBI;
+use Redis;
+use Time::localtime;
+
+
+# dynamic variables
+
+
+# const variables
+my $host;
+my $username;
+my $password;
+my $dbh;
+
+if (defined($ARGV[0]) && defined($ARGV[1]) && defined($ARGV[2])) {
+$host = $ARGV[0];
+$username = $ARGV[1];
+$password = $ARGV[2];
+#my $s = `ssh-keygen -f ~/.ssh/known_hosts -R $host`;
+#my $b = `ssh-keyscan $host >> ~/.ssh/known_hosts`;
+#sleep(1);
+} else {
+print "Bad or no parameters specified!\n";
+print "Use ./script <host> <user> <password>\n";
+exit 1;
+}
+
+
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+sub get_settings {
+dbconn();
+my $sth = $dbh->prepare( "SELECT pavad, reiksm FROM nustatymai" );
+$sth->execute();
+my $results = $sth->fetchall_arrayref({});
+my @switch_ports = ();
+for (@{$results}) {
+   my $name = $_->{pavad};
+   my $value = $_->{reiksm};
+push @{ $settings{$name} }, $value;
+}
+#print Dumper(%settings);
+#print "Testas: ".$settings{url_web_view}[0]."\n";
+$regexp = $settings{hardbounces}[0];
+$optiona = $settings{a_keyword}[0];
+$optionb = $settings{b_keyword}[0];
+$sth->finish();
+}
+
+print "Connecting to: $host\n";
+my $ssh = Net::SSH::Perl->new($host, debug => 0, protocol => '2');
+#my $loginStatus = $ssh->login($username,$password);
+
+eval{$ssh->login($username,$password);};
+       if ($@){
+           print "Unable to connect to $host\n$@\n";
+    }
+my $stdout;
+my $stderr;
+my $exit;
+my $count = 0;
+
+sub timestamp {
+  my $t = localtime;
+  return sprintf( "%04d-%02d-%02d_%02d:%02d:%02d",
+                  $t->year + 1900, $t->mon + 1, $t->mday,
+                  $t->hour, $t->min, $t->sec );
+}
+
+sub logsql {
+my ($text) = @_;
+my $sth = $dbh->prepare("INSERT INTO controller_logs (text) VALUES(?)");
+$sth->execute($text);
+}
+
+sub campaign_pause_manual {
+my ($email) = @_;
+dbconn();
+my $sth = $dbh->prepare("select campaigns.uid from subscribers inner join campaigns_lists_segments on subscribers.mail_list_id = campaigns_lists_segments.mail_list_id inner join campaigns on campaigns_lists_segments.campaign_id = campaigns.id where subscribers.email = ?");
+$sth->execute($email);
+my $campaigns = $sth->fetchall_arrayref({});
+for my $camp (@$campaigns) {
+print "Campaign: $camp->{uid}\n";
+my $redis = Redis->new(server => '127.0.0.1:6379', reconnect => 60);
+# jeigu egzistuoja keywordas
+#if ($redis->exists($camp->{uid}."_paused")) {
+#$redis->del($camp->{uid}."_paused");
+#}
+logsql("$host - Option B: Permanent pausing the campaign: $camp->{uid}");
+#write_log("Catched regexp on $host, email: $email");
+$redis->set($camp->{uid}."_paused","Is backend $host, pagautas del hardbounce $email");
+}
+}
+
+
+# change tracking info and continue
+sub campaign_pause_auto {
+my ($email) = @_;
+dbconn();
+my $sth = $dbh->prepare("select campaigns.uid from subscribers inner join campaigns_lists_segments on subscribers.mail_list_id = campaigns_lists_segments.mail_list_id inner join campaigns on campaigns_lists_segments.campaign_id = campaigns.id where subscribers.email = ?");
+$sth->execute($email);
+my $campaigns = $sth->fetchall_arrayref({});
+for my $camp (@$campaigns) {
+my $redis = Redis->new(server => '127.0.0.1:6379', reconnect => 60);
+$redis->set($camp->{uid}."_paused","Is backend $host, pagautas del hardbounce $email");
+logsql("$host - Option A: Auto pausing campaign: $camp->{uid} by catched: $email");
+auto_change_domain($camp->{uid},1);
+logsql("$host - Option A: Resuming campaign: $camp->{uid}, domain replaced");
+$redis->del($camp->{uid}."_paused");
+#write_log("Catched regexp on $host, email: $email");
+}
+}
+
+# auto_change_domain(campaign_uid);
+sub auto_change_domain {
+my ($uidas, $force_all) = @_;
+# get curr domain
+my $sta = $dbh->prepare("select value from settings where name = ?");
+$sta->execute("global_tracking");
+my $domvar = $sta->fetchall_arrayref({});
+my $current_dom = @$domvar[0]->{value};
+chomp($current_dom);
+print "Current: $current_dom\n";
+# get all domains
+my $sth = $dbh->prepare("select reiksm from nustatymai where id = 6");
+$sth->execute();
+my $var = $sth->fetchall_arrayref({});
+my @domains = split "\n", @$var[0]->{reiksm};
+my $dom_count = scalar @domains-1;
+my $count = 0;
+while (@domains) {
+  my $item = $domains[$count];
+  chomp($item);
+  if ($item eq $current_dom) {
+ last;
+ }
+$count++;
+last if ($count >= $dom_count);
+}
+# add one more number and check it now
+if ($count >= $dom_count) {
+$count = 0;
+} else {
+$count++;
+}
+print "Calculated id: $count from $dom_count\n";
+print "Selected domain: ".$domains[$count]."\n";
+my $from = "info\@".$domains[$count];
+if ($force_all == 1) {
+my $stb = $dbh->prepare("UPDATE settings set value = ? WHERE name = 'global_tracking'");
+$stb->execute($domains[$count]);
+}
+my $redis = Redis->new(server => '127.0.0.1:6379', reconnect => 60);
+# jeigu egzistuoja keywordas
+if ($redis->exists($uidas)) {
+my $data = $redis->get($uidas);
+my $json = decode_json($data);
+$json->{from_email} = "info\@".$domains[$count];
+$json->{trackurl} = $domains[$count]; # tik vienai partijai, paskuj uzsideda is globalo
+$redis->set($uidas,encode_json($json));
+logsql("$host - Campaign: $uidas sending information changed to: ".$domains[$count]);
+}
+my $stc = $dbh->prepare("UPDATE campaigns set from_email = ?, reply_to = ? where uid = ?");
+$stc->execute($from,$from,$uidas);
+
+} # end auto_change_domain
+
+
+
+sub write_log {
+my ($text) = @_;
+open(my $fh, '>>', $log_file);
+print $fh "[$host]: $text\n";
+close $fh;
+}
+
+sub write_bad {
+my ($text) = @_;
+open(my $fh, '>>', $bad_file);
+print $fh "$text\n";
+close $fh;
+}
+
+read_lavonelis();
+dbconn();
+get_settings();
+logsql("Restarting parsing system on server $host...");
+write_log("Restarting parsing system on server $host...");
+
+sub change_server {
+my ($email) = @_;
+my $stat = `/usr/bin/perl \$HOME/public_html/tools/change_server_bymail $email`;
+my $stat2 = `/usr/bin/perl \$HOME/public_html/tools/change_tracking_bymail $email`;
+open(my $fh, '>>', $log_file);
+print $fh "[ $host - " . timestamp() . "]: Changing server for: $email status: \n$stat\n$stat2\n";
+close $fh;
+}
+$ssh->register_handler("stdout", sub {
+        my($channel, $buffer) = @_;
+        my $str = $buffer->bytes;
+if ($str =~ /to=<([^>]+)>, (.*)/) {
+my $account = $1;
+chomp($account);
+chomp($2);
+# hardbounce
+if ($2=~ /($regexp)/) {
+if (!exists $catched_emails{$account}) {
+write_log("$host -hardbounce issued on $account");
+logsql("$host - Hardbounce detected on: $account");
+write_bad($account);
+}
+$catched_emails{$account}++;
+}
+elsif ($2=~ /($optiona)/) { 
+if (!exists $catched_emails{$account}) {
+write_log("option a issued $account");
+logsql("$host - Option A detected on $account, real event accoured, doing pause...");
+#campaign_pause_auto($account);
+campaign_pause_manual($account);
+}
+$catched_emails{$account}++;
+}
+elsif ($2=~ /($optionb)/) {
+if (!exists $catched_emails{$account}) { 
+write_log("option b issued $account");
+logsql("$host - Option B detected on $account, real event accoured, doing pause...");
+campaign_pause_manual($account);
+}
+$catched_emails{$account}++;
+} # endif
+
+} # END /to=<([^>]+)>, (.*)/
+
+}); # END Handler
+
+($stdout,$stderr,$exit) = $ssh->cmd($command);

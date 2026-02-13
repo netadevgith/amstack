@@ -1,0 +1,2 @@
+@include('helpers.form_control', ['type' => 'text', 'name' => 'name', 'label' => 'MX hostname (without @)', 'value' => ''])
+@include('helpers.form_control', ['type' => 'text', 'name' => 'comment', 'label' => 'Comment', 'value' => ''])

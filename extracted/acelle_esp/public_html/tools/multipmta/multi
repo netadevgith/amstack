@@ -1,0 +1,420 @@
+#!/usr/bin/perl -w
+# apt-get install libfile-slurp-perl libmojolicious-perl
+# WHERE IS DNS AND IPS
+my $domain = "";
+if (defined($ARGV[0])) {
+$domain = $ARGV[0];
+}
+my $dns_file = 'ip_addr';
+## IP DNS ### format in the file
+my $pmta_conf = '/etc/pmta/config';
+my $interface;
+use strict;
+use warnings;
+use IO::Handle;
+use POSIX;
+use File::Copy qw(copy);
+use File::Slurp qw(read_file write_file);
+my $mta_count = 1;
+my $mta_total;
+my %mta_obj;
+
+sub build_pmta {
+my ($ip,$dns) = @_;
+print "Building pmta instance";
+print "IP: $ip ";
+print "DNS: $dns\n";
+print $interface "\n<virtual-mta mta-$mta_count>\n";
+print $interface "           smtp-source-host $ip $dns\n";
+print $interface "           \#cold-virtual-mta mta-".($mta_count+1)."\n" if ($mta_count ne $mta_total);
+print $interface "           <domain *>\n".
+    "                               max-cold-virtual-mta-msg 400/day\n".
+    "                               max-msg-rate 1000/h\n".
+    "           </domain>\n".
+    "</virtual-mta>\n";
+$mta_obj{'mta-'.$mta_count} = $ip;
+$mta_count++;
+}
+
+sub gen_mta_list {
+print $interface "\n<virtual-mta-pool mta-pool>\n";
+#sort keys %mta_obj;
+foreach my $name (sort keys %mta_obj) {
+        print $interface "           virtual-mta $name\n";
+       }
+print $interface "</virtual-mta-pool>\n";
+}
+
+sub add_header {
+my ($ip) = @_;
+print $interface "postmaster master\@".$domain."\n" .
+    "domain-key my-domain,*,/etc/dkim.key\n".
+    "domain-suffix ".$domain."\n".
+    "dummy-smtp-has-chunking yes\n".
+    "dummy-smtp-has-pipelining yes\n".
+    "dummy-smtp-has-mailmerge yes\n".
+    "dummy-smtp-blacklist /etc/pmta/blacklist.dat\n".
+    "dummy-smtp-log-blacklist yes\n".
+    "dummy-smtp-blacklist-bounce-method random\n".
+    "dummy-smtp-blacklist-bounce-percent 4\n".
+    "dummy-smtp-port 25\n".
+    "dummy-smtp-ip $ip\n".
+    "smtp-listener 0/0:2525\n\n".
+    "<source 0/0>\n".
+    "log-connections no\n".
+    "log-commands    no\n".
+    "log-data        no\n".
+    "allow-unencrypted-plain-auth no\n".
+    "default-virtual-mta by-smtp-source-ip\n".
+    "process-x-virtual-mta yes\n".
+    "smtp-service yes\n".
+    "always-allow-api-submission yes\n".
+    "allow-smtputf8 no\n".
+    "</source>\n\n".
+    "<source 127.0.0.1>\n".  
+    "always-allow-relaying yes\n".   
+    "process-x-virtual-mta yes\n".                                  
+    "max-message-size unlimited\n".         
+    "smtp-service yes\n".                             
+    "allow-mailmerge yes\n".
+    "</source>\n\n";
+}
+
+sub add_clients {
+my ($ip) = @_;
+print $interface "\n<source $ip>\n".
+    "always-allow-relaying yes\n".
+    "process-x-virtual-mta yes\n".
+    "default-virtual-mta by-smtp-source-ip\n".
+    "max-message-size unlimited\n".
+    "smtp-service yes\n".  
+    "hide-message-source true\n".
+    "remove-header Received\n".
+    "allow-mailmerge yes\n".
+    "allow-smtputf8 no\n".
+    "</source>\n\n";
+}
+
+sub add_footer {
+print $interface "\n<source {auth}>\n".
+    "  always-allow-relaying yes\n".
+    "  process-x-virtual-mta yes\n". 
+    "  max-message-size unlimited\n".
+    "  smtp-service yes\n".            
+    "  require-auth true\n".
+    "  default-virtual-mta mta-pool\n".
+    "</source>\n\n".
+#### DEFAULT DOMAIN CONFIG 
+"<domain *>\n".
+"    max-smtp-out    2\n".
+"    bounce-after    24h\n".
+"    retry-after     10m\n".
+"    max-msg-rate 1000/h\n".
+"    max-msg-per-connection 100\n".
+"    max-errors-per-connection 10\n".
+"    smtp-greeting-timeout 5m\n".
+"    bounce-upon-no-mx yes\n".
+"\#    mx-connection-attempts 3\n".
+"    smtp-pattern-list blocking-errors\n".
+"    backoff-to-normal-after 1h\n".
+"    backoff-to-normal-after-delivery yes\n".
+"    backoff-notify \"\"\n".
+"    backoff-max-msg-rate 1/m\n".
+"    backoff-retry-after 20m\n".
+"    dkim-sign yes\n".
+"    ignore-8bitmime true\n".
+"    assume-delivery-upon-data-termination-timeout yes \# avoid duplicate deliveries\n".
+"     use-starttls yes\n".
+"     require-starttls no\n".
+"</domain>\n\n".
+"\#\#\#\# HTTP\n".
+"http-mgmt-port 8081\n\n".
+"\#\#\# HTTP AUTH\n".
+"http-access 0/0 monitor\n".
+"http-access 135.181.2.15 admin\n".
+"sync-msg-create false\n".
+"sync-msg-update false\n".
+"run-as-root no\n".
+"log-file /var/log/pmta/pmta.log\n".
+"log-auto-rotation true\n\n".
+"<acct-file /var/log/pmta/delivery.csv>\n".
+"    records b,d, rb\n".
+"    record-fields d bounceCat, rcpt, dlvSourceIp, header_Osver, dsnDiag\n".
+"    record-fields b bounceCat, rcpt, dlvSourceIp, header_Osver, dsnDiag\n".
+"    iso-times no\n".
+"    sync yes\n".
+"</acct-file>\n\n".
+"<spool /var/spool/pmta>\n".
+"    deliver-only no\n".
+"</spool>\n\n".
+"<smtp-pattern-list common-errors>\n".
+"reply /generating high volumes of.* complaints from AOL/    mode=backoff\n".
+"reply /Excessive unknown recipients - possible Open Relay/  mode=backoff\n".
+"reply /^421 .* too many errors/                             mode=backoff\n".
+"reply /blocked.*spamhaus/                                   mode=backoff\n".
+"reply /451 Rejected/                                        mode=backoff\n".
+"</smtp-pattern-list>\n\n".
+
+"<bounce-category-patterns>\n".
+"    /spam/ spam-related\n".
+"    /junk mail/ spam-related\n".
+"    /blacklist/ spam-related\n".
+"    /blocked/ spam-related\n".
+'    /\\bU\\.?C\\.?E\\.?\\b/ spam-related'."\n".
+'    /\\bAdv(ertisements?)?\\b/ spam-related'."\n".
+"    /unsolicited/ spam-related\n".
+'    /\\b(open)?RBL\\b/ spam-related'."\n".
+"    /realtime blackhole/ spam-related\n".
+'    /http:\\/\\/basic.wirehub.nl\\/blackholes.html/ spam-related'."\n".
+"    /\\bvirus\\b/ virus-related\n".
+'    /message +content/ content-related'."\n".
+'    /content +rejected/ content-related'."\n".
+"    /quota/ quota-issues\n".
+"    /limit exceeded/ quota-issues\n".
+'    /mailbox +(is +)?full/ quota-issues'."\n".
+'    /\\bstorage\\b/ quota-issues'."\n".
+'    /(user|mailbox|recipient|rcpt|local part|address|account|mail drop|ad(d?)ressee) (has|has been|is)? *(currently|temporarily +)?(disabled|expired|inactive|not activated)/ inactive-mailbox'."\n".
+'    /(conta|usu.rio) inativ(a|o)/ inactive-mailbox'."\n".
+'    /Too many (bad|invalid|unknown|illegal|unavailable) (user|mailbox|recipient|rcpt|local part|address|account|mail drop|ad(d?)ressee)/ other'."\n".
+'    /(No such|bad|invalid|unknown|illegal|unavailable) (local +)?(user|mailbox|recipient|rcpt|local part|address|account|mail drop|ad(d?)ressee)/ bad-mailbox'."\n".
+'    /(user|mailbox|recipient|rcpt|local part|address|account|mail drop|ad(d?)ressee) +(\\S+@\\S+ +)?(not (a +)?valid|not known|not here|not found|does not exist|bad|invalid|unknown|illegal|unavailable)/ bad-mailbox'."\n".
+'    /\\S+@\\S+ +(is +)?(not (a +)?valid|not known|not here|not found|does not exist|bad|invalid|unknown|illegal|unavailable)/ bad-mailbox'."\n".
+'    /no mailbox here by that name/ bad-mailbox'."\n".
+'    /my badrcptto list/ bad-mailbox'."\n".
+'    /not our customer/ bad-mailbox'."\n".
+'    /no longer (valid|available)/ bad-mailbox'."\n".
+'    /have a \\S+ account/ bad-mailbox'."\n".
+'    /\\brelay(ing)?/ relaying-issues'."\n".
+'    /domain (retired|bad|invalid|unknown|illegal|unavailable)/ bad-domain'."\n".
+'    /domain no longer in use/ bad-domain'."\n".
+'    /domain (\\S+ +)?(is +)?obsolete/ bad-domain'."\n".
+'    /denied/ policy-related'."\n".
+'    /prohibit/ policy-related'."\n".
+'    /rejected/ policy-related'."\n".
+'    /refused/ policy-related'."\n".
+'    /allowed/ policy-related'."\n".
+'    /banned/ policy-related'."\n".
+'    /policy/ policy-related'."\n".
+'    /suspicious activity/ policy-related'."\n".
+'    /bad sequence/ protocol-errors'."\n".
+'    /syntax error/ protocol-errors'."\n".
+'    /\\broute\\b/ routing-errors'."\n".
+'    /\\bunroutable\\b/ routing-errors'."\n".
+' /\\bunrouteable\\b/ routing-errors'."\n".
+'#additions by krish'."\n".
+'/Recipient address rejected/ invalid-mailbox'."\n".
+'/DYN:T1/ ploicy-related'."\n".
+'/Service unavailable/ ploicy-related'."\n".
+'/DNSBL/ spam-related'."\n".
+'/ccount has been disabled or discontinued/ bad-mailbox'."\n".
+'/oo many recip/ policy-related'."\n".
+'/no valid recipie/ invalid-mailbox'."\n".
+'/Account Inactive/ invalid-mailbox'."\n".
+'/service provider since part of their network is on our block list/ spam-related'."\n".
+'/Invalid 7bit DATA/ content-related'."\n".
+    '/^2.\d+.\d+;/ success'."\n".
+    '/^[45]\.1\.[1346];/ bad-mailbox'."\n".
+    '/^[45]\.1\.2/ bad-domain'."\n".
+    '/^[45]\.1\.[78];/ invalid-sender'."\n".
+    '/^[45]\.2\.0;/ bad-mailbox'."\n".
+    '/^[45]\.2\.1;/ inactive-mailbox'."\n".
+    '/^[45]\.2\.2;/ quota-issues'."\n".
+    '/^[45]\.3\.3;/ content-related'."\n".
+    '/^[45]\.3\.5;/ bad-configuration'."\n".
+    '/^[45]\.4\.1;/ no-answer-from-host'."\n".
+    '/^[45]\.4\.2;/ bad-connection'."\n".
+    '/^[45]\.4\.[36];/ routing-errors'."\n".
+    '/^[45]\.4\.7;/ message-expired'."\n".
+    '/^[45]\.5\.3;/ policy-related'."\n".
+    '/^[45]\.5\.\d+;/ protocol-errors'."\n".
+    '/^[45]\.6\.\d+;/ content-related'."\n".
+    '/^[45]\.7\.[012];/ policy-related'."\n".
+    '/^[45]\.7\.7;/ content-related'."\n".
+    '// other    # catch-all'."\n".
+"</bounce-category-patterns>\n\n".
+
+"<smtp-pattern-list blocking-errors>\n\n".
+    'reply /421 .* SERVICE NOT AVAILABLE/ mode=backoff'."\n".
+    'reply /generating high volumes of.* complaints from AOL/ mode=backoff'."\n".
+    'reply /554 .*aol.com/ mode=backoff'."\n".
+    'reply /421dynt1/ mode=backoff'."\n".
+    'reply /HVU:B1/ mode=backoff'."\n".
+    'reply /DNS:NR/ mode=backoff'."\n".
+    'reply /RLY:NW/ mode=backoff'."\n".
+    'reply /DYN:T1/ mode=backoff'."\n".
+    'reply /RLY:BD/ mode=backoff'."\n".
+    'reply /RLY:CH2/ mode=backoff'."\n".
+    'reply /421 .* Please try again later/ mode=backoff'."\n".
+    'reply /421 Message temporarily deferred/ mode=backoff'."\n".
+    'reply /VS3-IP5 Excessive unknown recipients/ mode=backoff'."\n".
+    'reply /VSS-IP Excessive unknown recipients/ mode=backoff'."\n".
+    'reply /\[GL01\] Message from/ mode=backoff'."\n".
+    'reply /\[TS01\] Messages from/ mode=backoff'."\n".
+    'reply /\[TS02\] Messages from/ mode=backoff'."\n".
+    'reply /\[TS03\] All messages from/ mode=backoff'."\n".
+    'reply /exceeded the rate limit/ mode=backoff'."\n".
+    'reply /exceeded the connection limit/ mode=backoff'."\n".
+    'reply /Mail rejected by Windows Live Hotmail for policy reasons/ mode=backoff'."\n".
+    'reply /mail.live.com\/mail\/troubleshooting.aspx/ mode=backoff'."\n".
+    'reply /421 Message Rejected/ mode=backoff'."\n".
+    'reply /Client host rejected/ mode=backoff'."\n".
+    'reply /blocked using UCEProtect/ mode=backoff'."\n".
+    'reply /Mail Refused/ mode=backoff'."\n".
+    'reply /421 Exceeded allowable connection time/ mode=backoff'."\n".
+    'reply /amIBlockedByRR/ mode=backoff'."\n".
+    'reply /block-lookup/ mode=backoff'."\n".
+    'reply /Too many concurrent connections from source IP/ mode=backoff'."\n".
+    'reply /too many/ mode=backoff'."\n".
+    'reply /Exceeded allowable connection time/ mode=backoff'."\n".
+    'reply /Connection rate limit exceeded/ mode=backoff'."\n".
+    'reply /refused your connection/ mode=backoff'."\n".
+    'reply /try again later/ mode=backoff'."\n".
+    'reply /try later/ mode=backoff'."\n".
+    'reply /550 RBL/ mode=backoff'."\n".
+    'reply /TDC internal RBL/ mode=backoff'."\n".
+    'reply /connection refused/ mode=backoff'."\n".
+    'reply /please see www.spamhaus.org/ mode=backoff'."\n".
+    'reply /Message Rejected/ mode=backoff'."\n".
+    'reply /refused by antispam/ mode=backoff'."\n".
+    'reply /Service not available/ mode=backoff'."\n".
+    'reply /currently blocked/ mode=backoff'."\n".
+    'reply /locally blacklisted/ mode=backoff'."\n".
+    'reply /not currently accepting mail from your ip/ mode=backoff'."\n".
+    'reply /421.*closing connection/ mode=backoff'."\n".
+    'reply /421.*Lost connection/ mode=backoff'."\n".
+    'reply /476 connections from your host are denied/ mode=backoff'."\n".
+    'reply /421 Connection cannot be established/ mode=backoff'."\n".
+    'reply /421 temporary envelope failure/ mode=backoff'."\n".
+    'reply /421 4.4.2 Timeout while waiting for command/ mode=backoff'."\n".
+    'reply /450 Requested action aborted/ mode=backoff'."\n".
+    'reply /550 Access denied/ mode=backoff'."\n".
+    'reply /exceeded the rate limit/ mode=backoff'."\n".
+    'reply /421rlynw/ mode=backoff'."\n".
+    'reply /permanently deferred/ mode=backoff'."\n".
+    'reply /\d+\.\d+\.\d+\.\d+ blocked/ mode=backoff'."\n".
+    'reply /generating high volumes of.* complaints from AOL/    mode=backoff'."\n".
+    'reply /Excessive unknown recipients - possible Open Relay/  mode=backoff'."\n".
+    'reply /^421 .* too many errors/                             mode=backoff'."\n".
+    'reply /blocked.*spamhaus/                                   mode=backoff'."\n".
+    'reply /451 Rejected/                                        mode=backoff'."\n".
+
+"</smtp-pattern-list>\n\n".
+"<domain aol.com>\n".
+"    max-smtp-out 3\n".
+"    max-msg-per-connection 20\n".
+"    smtp-pattern-list blocking-errors\n".
+"    smtp-421-means-mx-unavailable yes\n".
+"    backoff-to-normal-after 4h\n".
+"    backoff-max-msg-rate 20/h\n".
+"    backoff-retry-after 120m\n".
+"    dkim-sign yes\n".
+"</domain>\n\n".
+"<domain tom.com>\n".
+"    max-smtp-out 3\n".
+"    max-msg-per-connection 20\n".
+"    smtp-pattern-list blocking-errors\n".
+"    smtp-421-means-mx-unavailable yes\n".
+"    backoff-to-normal-after 2h\n".
+"    backoff-max-msg-rate 20/h\n".
+"    backoff-retry-after 120m\n".
+"    dkim-sign yes\n".
+"</domain>\n\n".
+"domain-macro yahoo yahoo.com,yahoo.ca,rocketmail.com,ymail.com,yahoo.com.au,geocities.com,yahoo.com.mx,yahoo.com.br,altavista.com,ameritech.net,att.net,bellsouth.net,attbroadband.com,attcanada.net,attglobal.com,attglobal.net,attnet.com,attworldnet.com,bellatlantic.net,bellatlantic.net,bellsouth.com,bellsouth.net,flash.net,netzero.net,nvbell.net,pacbell.net,prodigy.com,prodigy.net,sbcglobal.net,sbcglobal.net,snet.net,swbell.com,swbell.net,toast.net,usa.net,verizon.com,verizon.net,verizonmail.com,vzwpix.com,wans.net,worldnet.att.net,yahoo.net\n\n".
+"<domain \$yahoo>\n".
+"    max-msg-per-connection 2 \# yahoo policy\n".
+"    max-msg-rate 250/h \# prevent exceeded the rate limit\n".
+"</domain>\n\n".
+"domain-macro gmail gmail.com,googlemail.com\n\n".
+"<domain \$gmail>\n".
+"    max-msg-rate 250/h \# prevent exceeded the rate limit\n".
+"</domain>\n\n".
+"domain-macro hotmail hotmail.com,msn.com,hotmail.co.uk,hotmail.fr,live.com,hotmail.it,hotmail.de,email.msn.com,email.hotmail.com,email.msn.com,hotmail.com,live.com,msn.com,webtv.com,webtv.net\n\n".
+"<domain \$hotmail>\n".
+"    max-smtp-out 1 \# prevent exceeded the connection limit\n".
+"    max-msg-rate 250/h \# prevent exceeded the rate limit\n".
+"</domain>\n\n".
+"<domain online.no>\n".
+" max-smtp-out 10\n".
+"   max-msg-per-connection 150\n".
+"    smtp-pattern-list blocking-errors\n".
+"    backoff-to-normal-after 1h\n".
+"    backoff-max-msg-rate 150/h\n".
+"    backoff-retry-after 10m\n".
+"    dkim-sign yes\n".
+"</domain>\n\n".
+"<domain att.net>\n".
+"    max-smtp-out 2\n".
+"    dkim-sign yes\n".
+"</domain>\n\n".
+"<domain comcast.net>\n".
+"    dkim-sign yes\n".
+"    max-smtp-out 2\n".
+"    max-msg-per-connection 20\n".
+"</domain>\n\n".
+"<domain excite.com>\n".
+"    dkim-sign yes\n".
+"    backoff-max-msg-rate 100/h\n".
+"</domain>\n\n".
+"<domain comcast.net>\n".
+"    dkim-sign yes\n".
+"    max-msg-rate 100/h\n".
+"</domain>\n\n".
+"<domain dkimvalidator.com>\n".
+"    dkim-sign yes\n".
+"    max-msg-rate 50/h\n".
+"</domain>\n\n".
+"domain-macro gmx gmx.de,gmx.net,vollbio.de,gmx.ch,partybombe.de,abwesend.de,gmx.at,gmx.eu\n".
+"<domain gmx.queue>\n".
+"smtp-421-means-mx-unavailable yes\n".
+"    smtp-pattern-list blocking-errors\n".
+"    backoff-to-normal-after 2h\n".
+"    backoff-max-msg-rate 85/h\n".
+"    backoff-retry-after 90m\n".
+"max-smtp-out 1\n".
+"max-msg-rate 100/h\n".
+"dkim-sign yes\n".
+"</domain>\n".
+"<domain \$gmx>\n".
+"queue-to \"gmx.queue\"\n".
+"</domain>\n";
+}
+
+mkdir '/etc/pmta' if (!-e '/etc/pmta'); # create directory if it's does not exist
+rename('/etc/pmta/config','/etc/pmta/config-bak-'.rand()) if (-e '/etc/pmta/config'); # do the backup of the config file if it's exist
+# initialize the config file interface for lines submission
+sysopen($interface, $pmta_conf, O_APPEND | O_CREAT | O_RDWR) or die;
+$interface->autoflush(1);
+$mta_total = `wc -l $dns_file|awk '{print \$1}'`;
+chomp($mta_total);
+print "Total dns entries found: $mta_total\n";
+add_header(`head -n1 $dns_file|awk '{print \$1}'`);
+print $interface "<smtp-user usr>\n".
+    "password 1235asdf421\n".
+    "source {auth}\n".
+"</smtp-user>\n\n";
+print $interface "<source {auth}>\n".
+"always-allow-relaying yes\n".
+"process-x-virtual-mta yes\n".
+"default-virtual-mta by-smtp-source-ip \#delivery by target ip\n".
+"\#default-virtual-mta mta-pool \# delivery to the pool\n".
+"max-message-size unlimited\n".
+"smtp-service yes\n".
+"hide-message-source true\n".
+"remove-header Received\n".
+"require-auth true\n".
+"allow-mailmerge yes\n".
+"</source>\n";
+
+#add_clients("62.210.13.52");
+#add_clients("51.15.24.145");
+#add_clients("212.129.63.197");
+# do foreach the ip dns
+open(my $fh, '<:encoding(UTF-8)', $dns_file) or die "Could not open file '$dns_file' $!";
+    while (my $row = <$fh>) {
+    chomp $row;
+     my @words = split / /, $row; # SPLIT " - " 
+     build_pmta($words[0],$words[1]); 
+    }
+
+gen_mta_list();
+add_footer();

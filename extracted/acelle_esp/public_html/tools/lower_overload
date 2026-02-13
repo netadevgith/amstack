@@ -1,0 +1,488 @@
+#!/usr/bin/perl -w
+
+use strict;
+use Term::ANSIColor 2.00 qw(:pushpop);
+use DBI;
+use Data::Dumper;
+use Try::Tiny;
+
+
+my $limit = 1;
+my $log_file = "lower_overload.log";
+
+my $db_to_host = "app3.parkagency.net";
+my $db_to = "mailsendas_history";
+my $db_to_user = "history";
+my $db_to_pass = "24qt098uaf";
+my %env;
+my $dbh;
+my $dbhto;
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+read_lavonelis();
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 1 }) or die "Unable to connect to MySQL\n";
+$dbhto = DBI->connect("DBI:mysql:".$db_to.":".$db_to_host, $db_to_user, $db_to_pass, { PrintError => 1, RaiseError => 1 }) or die "Unable to connect to MySQL\n";
+}
+
+# DBI Interface to mysql Deadlocking avoid
+sub dbi_deadlock_handler
+{
+my $retval = 1;
+    my $message = @_;
+    if($message =~ m/DBD::mysql::st execute failed: MySQL server has gone away/)
+    {
+      my $caught=1;
+      $retval=0; # found deadlock
+    }
+    return $retval;
+}
+
+sub write_log {
+my ($text) = @_;
+open(my $fh, '>>', $log_file);
+print $fh "$text\n";
+close $fh;
+}
+
+# checks if mysql table entry exists
+sub if_entry_exists {
+my ($table,$column,$value) = @_;
+my $stmt = "SELECT $column FROM $table WHERE $column = ?";
+if ($dbhto->selectrow_array($stmt, undef, $value)) {
+return 1;
+} else {
+return undef;
+}
+}
+
+
+sub copy_subscribers {
+my ($campaign, $mail_list_id) = @_;
+chomp($mail_list_id);
+my $sth = $dbh->prepare("select * from subscribers where mail_list_id = ?");
+$sth->execute($campaign->{mail_list_id});
+my $subscribers = $sth->fetchall_arrayref({});
+print "Copying subscribers for: $mail_list_id ...\n";
+my $sta = $dbhto->prepare("INSERT IGNORE INTO subscribers (uid,mail_list_id,email,status,opened_at,created_at,updated_at,subscription_type) VALUES(?,?,?,?,?,?,?,?)");
+my $cnt = 0;
+for my $subscriber (@$subscribers) {
+$cnt++;
+#$sta->execute($subscriber->{uid},$mail_list_id,$subscriber->{email},$subscriber->{status},$subscriber->{opened_at},$subscriber->{created_at},$subscriber->{updated_at},$subscriber->{subscription_type});
+my $db_res=0;
+while($db_res==0)
+{
+   $db_res=1;
+   try{
+   $sta->execute($subscriber->{uid},$mail_list_id,$subscriber->{email},$subscriber->{status},$subscriber->{opened_at},$subscriber->{created_at},$subscriber->{updated_at},$subscriber->{subscription_type});
+   }
+   catch
+   {
+       print "We caught $_ in on subscribers insertion to MySQL\nRetrying...\n";
+       write_log("We caught $_ in insertion to MySQL\n on subscribers insertion Retrying...\n");
+       $db_res=dbi_deadlock_handler($_);
+       if($db_res==0){sleep 2;}
+   }
+}
+
+
+}
+print "Number: $cnt subscribers processed, copied to the remote system!\n";
+}
+
+sub copy_contacts {
+my ($campaign) = @_;
+if (!if_entry_exists("contacts","uid",$campaign->{contacts_uid})) {
+print "Contacts entry does not exists, creating...\n";
+# go trough old database table by cycle and copy to the new remote database
+my $sth = $dbh->prepare("select * from contacts where uid = ?");
+$sth->execute($campaign->{contacts_uid});
+my $contacts = $sth->fetchall_arrayref({});
+my $sta = $dbhto->prepare("INSERT IGNORE INTO contacts (uid,first_name,last_name,company,address_1,address_2,country_id,state,zip,phone,url,created_at,updated_at,email,city,tax_number,billing_address) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+for my $contact (@$contacts) {
+
+my $db_res=0;
+while($db_res==0)
+{
+   $db_res=1;
+   try{
+   $sta->execute($contact->{uid},$contact->{first_name},$contact->{last_name},$contact->{company},$contact->{address_1},
+   $contact->{address_2},$contact->{country_id},$contact->{state},$contact->{zip},$contact->{phone},$contact->{url},$contact->{created_at},
+   $contact->{updated_at},$contact->{email},$contact->{city},$contact->{tax_number},$contact->{billing_address});
+   }
+   catch
+   {
+       print "We caught $_ in on contacts insertion to MySQL\nRetrying...\n";
+       write_log("We caught $_ in insertion to MySQL\n on contacts insertion Retrying...\n");
+       $db_res=dbi_deadlock_handler($_);
+       if($db_res==0){sleep 2;}
+   }
+}
+
+
+
+
+
+}
+return $sta->{mysql_insertid};
+}
+print "Contacts entry already exist!\n";
+my $sql = "SELECT id FROM contacts WHERE uid=?";
+my @row = $dbhto->selectrow_array($sql,undef,$campaign->{contacts_uid});
+unless (@row) { print "Entry $campaign->{contacts_uid} does not exists, but it should! CRITICAL!"; }
+return $row[0];
+}
+
+sub get_subscriber_id_by_uid {
+my ($uid) = @_;
+my $sql = "SELECT id FROM subscribers WHERE uid=?";
+my @row = $dbhto->selectrow_array($sql,undef,$uid);
+unless (@row) { print "Subscriber $uid does not exists, but it should! CRITICAL!\n"; }
+return $row[0];
+}
+
+# kazkada gali reiketi
+#sub get_link_id_by_url {
+#my ($url) = @_;
+#my $sql = "SELECT id FROM links WHERE url=?";
+#my @row = $dbhto->selectrow_array($sql,undef,$url);
+#unless (@row) { print "URL $url does not exists, but it should! CRITICAL!\n"; }
+#return $row[0];
+#}
+
+sub populate_links {
+my ($campaign,$campaign_id) = @_;
+print "Populating links table\n";
+my $sth = $dbh->prepare("SELECT campaign_links.*, links.url as url  FROM campaign_links inner join links on campaign_links.link_id = links.id where campaign_links.campaign_id = ?");
+$sth->execute($campaign->{id});
+my $links = $sth->fetchall_arrayref({});
+my $sta = $dbhto->prepare("INSERT IGNORE INTO links (url, created_at, updated_at) VALUES(?,?,?)");
+my $stb = $dbhto->prepare("INSERT IGNORE INTO campaign_links (campaign_id,link_id,created_at,updated_at) VALUES(?,?,?,?)");
+for my $link (@$links) {
+# sudedam linka, gaunam jo id tada sudedam i campaign_links
+
+
+
+my $db_res=0;
+while($db_res==0)
+{
+   $db_res=1;
+   try{
+   $sta->execute($link->{url},$link->{created_at},$link->{updated_at});
+   }
+   catch
+   {
+       print "We caught $_ in on links insertion to MySQL\nRetrying...\n";
+       write_log("We caught $_ in insertion to MySQL\n on links insertion Retrying...\n");
+       $db_res=dbi_deadlock_handler($_);
+       if($db_res==0){sleep 2;}
+   }
+}
+
+
+my $link_id = $sta->{mysql_insertid};
+
+
+$db_res=0;
+while($db_res==0)
+{
+   $db_res=1;
+   try{
+   $stb->execute($campaign_id,$link_id,$link->{created_at},$link->{updated_at});
+   }
+   catch
+   {
+       print "We caught $_ in on links campaign_links to MySQL\nRetrying...\n";
+       write_log("We caught $_ in insertion to MySQL\n on campaign_links insertion Retrying...\n");
+       $db_res=dbi_deadlock_handler($_);
+       if($db_res==0){sleep 2;}
+   }
+}
+
+
+print "New link processed in the system: $link->{url} with id: $link_id\n";
+}
+}
+
+sub populate_tracking_log {
+my ($campaign, $mail_list_id, $campaign_id) = @_;
+print "Populating tracking_log with entries...\n";
+# go trough old database table by cycle and copy to the new remote database
+my $sth = $dbh->prepare("select tracking_logs.*, subscribers.uid as subscriber_uid from tracking_logs inner join subscribers on tracking_logs.subscriber_id = subscribers.id  where campaign_id = ?");
+$sth->execute($campaign->{id});
+my $tracking_log = $sth->fetchall_arrayref({});
+my $sta = $dbhto->prepare("INSERT IGNORE INTO tracking_logs
+(runtime_message_id, message_id, customer_id, sending_server_id, campaign_id, subscriber_id,
+status, error, created_at, updated_at, auto_trigger_id, sub_account_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)");
+my $cnt1 = 0;
+for my $track (@$tracking_log) {
+$cnt1++;
+my $subscriber_id = get_subscriber_id_by_uid($track->{subscriber_uid});
+
+
+my $db_res=0;
+while($db_res==0)
+{
+   $db_res=1;
+   try{
+   $sta->execute($track->{runtime_message_id},$track->{message_id},$track->{customer_id},1,$campaign_id,$subscriber_id,
+   $track->{status},$track->{error},$track->{created_at},$track->{updated_at},$track->{auto_trigger_id},$track->{sub_account_id});
+   }
+   catch
+   {
+       print "We caught $_ in on links insertion to MySQL\nRetrying...\n";
+       write_log("We caught $_ in insertion to MySQL\n on links insertion Retrying...\n");
+       $db_res=dbi_deadlock_handler($_);
+       if($db_res==0){sleep 2;}
+   }
+}
+
+
+}
+print "Done processing tracking_log table, we got $cnt1 items in there!\n";
+
+# lets populate open_logs table
+print "Time to process open logs table...\n";
+my $stb = $dbh->prepare("select open_logs.*, tracking_logs.campaign_id as campaign_id from open_logs inner join tracking_logs on open_logs.message_id = tracking_logs.message_id where tracking_logs.campaign_id = ?");
+$stb->execute($campaign->{id});
+my $open_log = $stb->fetchall_arrayref({});
+my $stt = $dbhto->prepare("INSERT IGNORE INTO open_logs (message_id,ip_address,user_agent,created_at,updated_at) VALUES(?,?,?,?,?)");
+my $cnt2 = 0;
+for my $openas (@$open_log) {
+$cnt2++;
+
+
+
+my $db_res=0;
+while($db_res==0)
+{
+   $db_res=1;
+   try{
+  $stt->execute($openas->{message_id},$openas->{ip_address},$openas->{user_agent},$openas->{created_at},$openas->{updated_at});
+   }
+   catch
+   {
+       print "We caught $_ in on open_logs insertion to MySQL\nRetrying...\n";
+       write_log("We caught $_ in insertion to MySQL\n on open_logs insertion Retrying...\n");
+       $db_res=dbi_deadlock_handler($_);
+       if($db_res==0){sleep 2;}
+   }
+}
+
+
+}
+print "Open logs table processed with $cnt2 entries!\n";
+# we first need to populate the links table with links from the old system
+populate_links($campaign,$campaign_id);
+print "Populating click_logs with data...\n";
+# lets populate click_logs table
+my $stc = $dbh->prepare("select click_logs.*, tracking_logs.campaign_id as campaign_id from click_logs inner join tracking_logs on click_logs.message_id = tracking_logs.message_id where tracking_logs.campaign_id = ?");
+$stc->execute($campaign->{id});
+my $click_log = $stc->fetchall_arrayref({});
+my $std = $dbhto->prepare("INSERT IGNORE INTO click_logs (message_id,url,ip_address,user_agent,created_at,updated_at) VALUES(?,?,?,?,?,?)");
+my $cnt3 = 0;
+for my $clickas (@$click_log) {
+$cnt3++;
+
+
+
+my $db_res=0;
+while($db_res==0)
+{
+   $db_res=1;
+   try{
+  $std->execute($clickas->{message_id},$clickas->{url},$clickas->{ip_address},$clickas->{user_agent},$clickas->{created_at},$clickas->{updated_at});
+   }
+   catch
+   {
+       print "We caught $_ in on click_logs insertion to MySQL\nRetrying...\n";
+       write_log("We caught $_ in insertion to MySQL\n on click_logs insertion Retrying...\n");
+       $db_res=dbi_deadlock_handler($_);
+       if($db_res==0){sleep 2;}
+   }
+}
+
+
+
+
+}
+print "Click logs: $cnt3 entries processed!\n";
+}
+
+
+sub populate_list_segments {
+my ($campaign, $mail_list_id, $campaign_id) = @_;
+# go trough old database table by cycle and copy to the new remote database
+my $sth = $dbh->prepare("select * from campaigns_lists_segments where campaign_id = ?");
+$sth->execute($campaign->{id});
+my $segments = $sth->fetchall_arrayref({});
+my $sta = $dbhto->prepare("INSERT IGNORE INTO campaigns_lists_segments (campaign_id, mail_list_id, segment_id, created_at, updated_at) VALUES(?,?,?,?,?)");
+for my $segment (@$segments) {
+
+
+
+my $db_res=0;
+while($db_res==0)
+{
+   $db_res=1;
+   try{
+  $sta->execute($campaign_id,$mail_list_id,$segment->{segment_id},$segment->{created_at},$segment->{updated_at});
+   }
+   catch
+   {
+       print "We caught $_ in on campaigns_lists_segments insertion to MySQL\nRetrying...\n";
+       write_log("We caught $_ in insertion to MySQL\n on campaigns_lists_segments insertion Retrying...\n");
+       $db_res=dbi_deadlock_handler($_);
+       if($db_res==0){sleep 2;}
+   }
+}
+
+
+
+
+}
+
+}
+
+sub process_mail_list {
+my ($campaign) = @_;
+print "Populating contacts table with $campaign->{contacts_uid} ...\n";
+my $contact_id = copy_contacts($campaign);
+my $mail_list_id;
+# check if mail list already in the remote history server
+if (!if_entry_exists("mail_lists","uid",$campaign->{mail_list_uid})) {
+print "Mail list: $campaign->{mail_list_uid} does not exist on the remote system\n";
+my $sth = $dbh->prepare("select * from mail_lists where uid = ?");
+$sth->execute($campaign->{mail_list_uid});
+my $mail_lists = $sth->fetchall_arrayref({});
+print "Creating Mail $campaign->{mail_list_uid} on the remote system...\n";
+my $sta = $dbhto->prepare("INSERT IGNORE INTO mail_lists
+(uid,customer_id,contact_id,name,default_subject,from_email,from_name,imap_host,imap_mail,imap_pass,imap_spam,recovery,
+remind_message,email_subscribe,email_unsubscribe,email_daily,send_welcome_email,unsubscribe_notification,status,
+created_at,updated_at,custom_order,subscribe_confirmation,cache,all_sending_servers) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+for my $mail_list (@$mail_lists) {
+
+my $db_res=0;
+while($db_res==0)
+{
+   $db_res=1;
+   try{
+  $sta->execute($mail_list->{uid},$mail_list->{customer_id},$contact_id,$mail_list->{name},
+  $mail_list->{default_subject},$mail_list->{from_email},$mail_list->{from_name},$mail_list->{imap_host},$mail_list->{imap_mail},
+  $mail_list->{imap_pass},$mail_list->{imap_spam},$mail_list->{recover},$mail_list->{remind_message},$mail_list->{email_subscribe},
+  $mail_list->{email_unsubscribe},$mail_list->{email_daily},$mail_list->{send_welcome_email},$mail_list->{unsubscribe_notifications},
+  $mail_list->{status},$mail_list->{created_at},$mail_list->{updated_at},$mail_list->{custom_order},$mail_list->{subscribe_confirmation},
+  $mail_list->{cache},$mail_list->{all_sending_servers});
+   }
+   catch
+   {
+       print "We caught $_ in on mail_lists insertion to MySQL\nRetrying...\n";
+       write_log("We caught $_ in insertion to MySQL\n on mail_lists insertion Retrying...\n");
+       $db_res=dbi_deadlock_handler($_);
+       if($db_res==0){sleep 2;}
+   }
+}
+
+
+}
+$mail_list_id = $sta->{mysql_insertid};
+##### POPULATE SUBSCRIBERS HERE #################
+copy_subscribers($campaign,$mail_list_id);
+#################################################
+} else {
+print "Mail List: $campaign->{mail_list_uid} already exists on the memote instance!\n";
+my $sql = "SELECT id FROM mail_lists WHERE uid=?";
+my @row = $dbhto->selectrow_array($sql,undef,$campaign->{mail_list_uid});
+unless (@row) { print "Mail_list Entry $campaign->{mail_list_uid} does not exists, but it should! CRITICAL!"; }
+$mail_list_id = $row[0];
+}
+# $sth->{mysql_insertid}
+#print "Got mail_list_id: $mail_list_id !\n";
+return $mail_list_id;
+}
+
+sub process_campaign {
+my ($campaign) = @_;
+print "Processing Campaign: $campaign->{name} with uid: $campaign->{uid}\n";
+my $mail_list_id = process_mail_list($campaign);
+print "Got fresh mail list id: $mail_list_id for the campaign $campaign->{name}\n";
+my $campaign_id;
+# check if campaign with specified uid exists, if not create it, then create list segments with data, got earlier
+if (!if_entry_exists("campaigns","uid",$campaign->{uid})) {
+print "Campaign: $campaign->{uid} does not exist on the remote system\n";
+my $sth = $dbh->prepare("select * from campaigns where uid = ?");
+$sth->execute($campaign->{uid});
+my $campaigns = $sth->fetchall_arrayref({});
+print "Creating campaign $campaign->{uid} on remote system...\n";
+my $sta = $dbhto->prepare("INSERT IGNORE INTO campaigns
+(uid, customer_id, type,name,subject,html,plain,from_email,from_name,reply_to,status,trackurl,
+ auto_pause,sign_dkim,track_open,track_click,resend,custom_order,run_at,delivery_at,created_at,updated_at,
+ template_source,last_error,is_auto,image,default_mail_list_id,cache) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+for my $campaignas (@$campaigns) {
+
+my $db_res=0;
+while($db_res==0)
+{
+   $db_res=1;
+   try{
+ $sta->execute($campaignas->{uid},$campaignas->{customer_id},$campaignas->{type},$campaignas->{name},
+ $campaignas->{subject},$campaignas->{html},$campaignas->{plain},$campaignas->{from_email},$campaignas->{from_name},
+ $campaignas->{reply_to},$campaignas->{status},$campaignas->{trackurl},$campaignas->{auto_pause},
+ $campaignas->{sign_dkim},$campaignas->{track_open},$campaignas->{track_click},$campaignas->{resend},$campaignas->{custom_order},
+ $campaignas->{run_at},$campaignas->{delivery_at},$campaignas->{created_at},$campaignas->{updated_at},$campaignas->{template_source},
+ $campaignas->{last_error},$campaignas->{is_auto},$campaignas->{image},$mail_list_id,$campaignas->{cache});
+   }
+   catch
+   {
+       print "We caught $_ in on campaigns insertion to MySQL\nRetrying...\n";
+       write_log("We caught $_ in insertion to MySQL\n on campaigns insertion Retrying...\n");
+       $db_res=dbi_deadlock_handler($_);
+       if($db_res==0){sleep 2;}
+   }
+}
+
+
+
+}
+$campaign_id = $sta->{mysql_insertid};
+##### TODO we deal with tracking/open/click logs here #################
+# we got campaign id, mail list and contact id's, we have everything and now we should copy tracking_log, then open and click logs, and all things should be over
+populate_list_segments($campaign,$mail_list_id,$campaign_id);
+populate_tracking_log($campaign,$mail_list_id,$campaign_id);
+#################################################
+} else {
+print "Campaign: $campaign->{name} with uid: $campaign->{uid} already exists on the memote instance!\n";
+my $sql = "SELECT id FROM campaigns WHERE uid=?";
+my @row = $dbhto->selectrow_array($sql,undef,$campaign->{uid});
+unless (@row) { print "Campaign Entry $campaign->{uid} does not exists, but it should! CRITICAL!"; }
+$campaign_id = $row[0];
+}
+print "Campaign and it's data are done with assigned system id: $campaign_id\n";
+
+}
+
+
+#### RAW CODE BEGINS HERE
+
+dbconn();
+my $query = "select campaigns.*, mail_list_id, mail_lists.uid as mail_list_uid,contacts.uid as contacts_uid from campaigns inner join campaigns_lists_segments on campaigns.id = campaigns_lists_segments.campaign_id inner join mail_lists on campaigns_lists_segments.mail_list_id = mail_lists.id inner join contacts on mail_lists.contact_id = contacts.id where campaigns.uid = '5b2b72e6a6976'";
+my $sth = $dbh->prepare($query); 
+$sth->execute();
+my $campaigns = $sth->fetchall_arrayref({});
+for my $campaign (@$campaigns) {
+process_campaign($campaign);
+}

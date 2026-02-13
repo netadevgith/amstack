@@ -1,0 +1,7 @@
+#!/bin/sh
+
+curl \
+  -i -X POST -H "Content-Type: multipart/form-data" \
+  -H "Authorization: 1122" \
+  -F "img=@image.gif" \
+  http://localhost:8082/api/v1/links/postimg

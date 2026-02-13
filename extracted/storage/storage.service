@@ -1,0 +1,11 @@
+[Unit]
+Description=Storage service
+After=syslog.target
+After=network.target
+[Service]
+Type=Simple
+RuntimeDirectory=/opt/storage
+ExecStart=/opt/storage/storage --daemonize
+TimeoutSec=300
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,65 @@
+#!/usr/bin/php
+<?php
+if ($argv[1] == "") {
+echo "Please provide a hash for the first parameter of this script\n";
+exit;
+}
+require("settings.php");
+
+// just for later work
+function post_request($url, array $params) {
+  $query_content = http_build_query($params);
+  $fp = fopen($url, 'r', FALSE, // do not use_include_path
+    stream_context_create([
+    'http' => [
+      'header'  => [ // header array does not need '\r\n'
+        'Content-type: application/x-www-form-urlencoded',
+        'Content-Length: ' . strlen($query_content)
+      ],
+      'method'  => 'POST',
+      'content' => $query_content
+    ]
+  ]));
+  if ($fp === FALSE) {
+    fclose($fp);
+    return json_encode(['error' => 'Failed to get contents...']);
+  }
+  $result = stream_get_contents($fp); // no maxlength/offset
+  fclose($fp);
+  return $result;
+}
+
+// another example
+function post_request2() {
+echo file_get_contents('https://www.server.com', false, stream_context_create([
+    'http' => [
+        'method' => 'POST',
+        'header'  => "Content-type: application/x-www-form-urlencoded",
+        'content' => http_build_query([
+            'key1' => 'Hello world!', 'key2' => 'second value'
+        ])
+    ]
+]));
+}
+
+// prod
+function get_storage_obj($hash) {
+global $api, $key;
+
+$url = "http://".$api."/api/v1/links/get/".$hash;
+echo "Opening connection to $url\n";
+$json = @file_get_contents($url, false, stream_context_create([
+    'http' => [
+        'method' => 'GET',
+        'header'  => "Content-Type: application/json\nAuthorization: $key",
+    ]
+]));
+$status = $http_response_header[0];
+echo "Returned status: $status\n";
+}
+
+require_once("settings.php");
+$hash = $argv[1];
+echo "Testing quering for hash $hash\n";
+get_storage_obj($hash);
+?>

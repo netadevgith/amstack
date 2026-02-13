@@ -1,0 +1,69 @@
+#!/usr/bin/perl -w
+# recovery emails
+#0 23 * * * $HOME/public_html/tools/schedule 1 > /dev/null 2>&1
+#0 0  * * 0 $HOME/public_html/tools/schedule 2 > /dev/null 2>&1
+#0 0  1 * * $HOME/public_html/tools/schedule 3 > /dev/null 2>&1
+# HOW IT WORKS?
+# 0 - never 
+# 1 - daily 0 23 * * *
+# 2 - weekly 0 0 * * 0
+# 3 - monthly 0 0 1 * *
+
+
+use strict;
+use warnings;
+use DBI;
+use Redis;
+use Data::Dumper;
+my $dbh;
+my %env; # variable to put laravel settings in
+my %settings = ();
+my $status = "subscribed";
+
+sub recovery_emails {
+# schedule type
+my ($type) = @_;
+my $sth = $dbh->prepare("select subscribers.id as id,email from subscribers inner join mail_lists on subscribers.mail_list_id = mail_lists.id where mail_lists.recovery = ?");
+$sth->execute($type);
+my $count = 0;
+my @results;
+while ( my @row1 = $sth->fetchrow_array ) { 
+$count++;
+push(@results, "\'" . $row1[0] . "\'");
+}
+if (@results) {
+my $formated = join(",",@results);
+my $raw = $dbh->prepare("UPDATE subscribers set status = '$status' WHERE id IN ($formated)");
+$raw->execute();
+}
+#print "Res: $formated\n";
+print "Accounts affected: $count\n";
+}
+
+
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+read_lavonelis();
+dbconn();
+
+if (defined($ARGV[0]) && $ARGV[0] > 0) {
+recovery_emails($ARGV[0]);
+}

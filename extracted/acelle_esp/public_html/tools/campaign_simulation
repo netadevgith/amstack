@@ -1,0 +1,130 @@
+#!/usr/bin/perl
+use Redis;
+use JSON::XS;
+use Data::Dumper;
+use Mojo::UserAgent;
+use Data::Dumper;
+use DBI;
+my %env; # variable to put laravel settings in
+my $ua  = Mojo::UserAgent->new;
+Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+my $redis;
+my $uid;
+my $email;
+my $api = "http://devtest.parkagency.net/api";
+
+sub UpdateStatus {
+my ($text) = @_;
+$redis->set($uid."_simulation","") if !($redis->exists($uid."_simulation"));
+if ($text eq "null") {
+$redis->set($uid."_simulation","");
+return;
+}
+$old = $redis->get($uid."_simulation");
+$old = $old.$text."\n";
+$redis->set($uid."_simulation",$old);
+}
+
+sub RedisInit {
+$redis = Redis->new(server => '127.0.0.1:6379', reconnect => 10);
+}
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"|| do { write_log("Unable to read laravel environment file, exiting..."); die "Neatidarau lavonelio aplinkos failo :(\n"; };
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:database=".$env{DB_DATABASE}.";host=".$env{DB_HOST}.";port=".$env{DB_PORT}, $env{DB_USERNAME}, $env{DB_PASSWORD},{ PrintError => 1, RaiseError => 0 }) or do {
+die "Unable to connect to MySQL\n"; };
+}
+
+sub Simulation {
+my ($uid,$email) = @_;
+# url http://devtest.parkagency.net/api/simulation-campaign -> uid. email
+# curl -X POST -d "api_key=1122&uid=5dad8bd546eb1&email=test@test.lt" http://devtest.parkagency.net/api/simulation-campaign
+$ua->post($api.'/simulation-campaign' => {Accept => '*/*'} => form => { 'api_key' => '1122','uid' => $uid, 'email' => $email });
+}
+
+sub GetDomains {
+$json = $ua->post($api.'/listdomains' => {Accept => '*/*'} => form => { 'api_key' => '1122' });
+$domains = $json->result->body;
+return decode_json($domains);
+}
+
+sub ChangeSendAddress {
+my ($uid,$address) = @_;
+dbconn();
+UpdateStatus("Changing send address to: $address");
+my $query  = "UPDATE campaigns set from_email = ?, reply_to = ? WHERE uid = ?";
+my $sth = $dbh->prepare($query);
+$sth->execute($address,$address,$uid);
+$camp = decode_json($redis->get($uid));
+$camp->{reply_to} = $address;
+$camp->{from_email} = $address;
+$redis->set($uid,encode_json($camp));
+}
+
+sub ChangeTrackUrl {
+my ($uid,$trackurl) = @_;
+dbconn();
+UpdateStatus("Changing trackurl to: ".$trackurl);
+my $query  = "UPDATE campaigns set trackurl = ? WHERE uid = ?";
+my $sth = $dbh->prepare($query);      
+$sth->execute($trackurl,$uid);
+$camp = decode_json($redis->get($uid));
+$camp->{trackurl} = $trackurl;
+$redis->set($uid,encode_json($camp));
+}
+
+sub TerminateJobs {
+my ($uid) = @_;
+UpdateStatus("Got termination signal... exiting...");
+$redis->del($uid."_simulation_stopped");
+exit();
+}
+RedisInit();
+read_lavonelis();
+if (!defined($ARGV[0])) {
+die "Campaign uid not specified"; 
+}
+if (!defined($ARGV[1])) {
+die "Email not specified";
+}
+$uid = $ARGV[0];
+$email = $ARGV[1];
+UpdateStatus("null");
+my $campaign = decode_json($redis->get($uid));
+#UpdateStatus("Got campakkign $uid");
+#UpdateStatus("From Email: ".$campaign->{from_email});
+#UpdateStatus("TrackUrl: ".$campaign->{trackurl});
+#UpdateStatus("We will try to inbox to: ".$email);
+#Simulation($uid,$email);
+$domains = GetDomains();
+TerminateJobs($uid) if ($redis->exists($uid."_simulation_stopped"));
+my @trackinfo = split /\@/, $campaign->{from_email};
+$trackinfo[0] = "info" if ($trackinfo[0] eq "");
+for my $dom( @{$domains} ){
+# here we will change the send address
+TerminateJobs($uid) if ($redis->exists($uid."_simulation_stopped"));
+ChangeSendAddress($uid,$trackinfo[0]."\@".$dom->{name});
+# here we will try to change trackurl
+for my $dom2( @{$domains} ){
+TerminateJobs($uid) if ($redis->exists($uid."_simulation_stopped"));
+ChangeTrackUrl($uid,$dom2->{name});
+Simulation($uid,$email);
+TerminateJobs($uid) if ($redis->exists($uid."_simulation_stopped"));
+}
+
+}

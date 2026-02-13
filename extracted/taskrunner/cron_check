@@ -1,0 +1,9 @@
+#!/bin/bash
+BASE=`dirname "$0"` # script directory
+PID=`cat ${BASE}/taskrunner.pid` # process pid file
+if [ -n "$(ps -p $PID -o pid=)" ]; then
+echo "TaskRunner is already running"
+else
+echo "TaskRunner is not running"
+${BASE}/taskrunner >> ${BASE}/taskrunner.log 2>&1&
+fi

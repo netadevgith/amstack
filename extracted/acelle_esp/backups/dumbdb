@@ -1,0 +1,5 @@
+#!/bin/sh
+cd "$(dirname "$0")" # cd to script directory
+mysqldump --single-transaction --routines --triggers storage | gzip -c > storage.sql.gz
+mysqldump --single-transaction --routines --triggers trackingas | gzip -c > trackingas.sql.gz
+mysqldump --single-transaction --routines --triggers mailsendas_testdev | gzip -c > mailsendas_testdev.sql.gz

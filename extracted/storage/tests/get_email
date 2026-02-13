@@ -1,0 +1,11 @@
+#!/bin/sh
+
+# load settings
+. key
+# load params
+EM="$1"
+
+echo "Authorizing with $KEY"
+echo "curl -i -H \"Content-Type: application/json\" -H \"Authorization: $KEY\" \"http://$URL/api/v1/mails/get/$EM\""
+curl -i -H "Content-Type: application/json" -H "Authorization: $KEY" "http://$URL/api/v1/mails/get/$EM"
+

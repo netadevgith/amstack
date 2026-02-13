@@ -1,0 +1,38 @@
+#!/usr/bin/perl -W
+
+my $storage_api = "http://116.202.114.76:8082/";
+my $storage_key = "1122";
+
+
+use strict;
+use warnings;
+use JSON::XS;
+use Mojo::UserAgent;
+use Data::Dumper;
+use POSIX qw(strftime);
+my $ua  = Mojo::UserAgent->new;
+Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+
+
+
+sub submit_delivery {
+my ($email,$campaign,$server_ip,$deployment,$status) = @_;
+my $now = strftime "%Y-%m-%d %H:%M:%S", gmtime();
+my @records;
+my %hash = ( email => $email, campaign => $campaign, server_ip => $server_ip, deployment => $deployment, status => $status, date_added => $now );
+push( @records, \%hash );
+print Dumper(\@records);
+my $tx = $ua->build_tx(POST => $storage_api."api/v1/deliveries/submit");
+$tx->req->headers->header('Content-Type', 'text/json');
+$tx->req->headers->header('Authorization',$storage_key);
+$tx->req->body(encode_json(\@records));
+$ua->start($tx);
+}
+
+
+
+submit_delivery("testas1\@gmail.com","UID1122","10.0.0.1","appX","sent 250 ok");
+submit_delivery("testas2\@gmail.com","UID1122","10.0.0.1","appX","sent 250 ok");             
+submit_delivery("testas3\@gmail.com","UID1122","10.0.0.1","appX","sent 250 ok");             
+submit_delivery("testas4\@gmail.com","UID1122","10.0.0.1","appX","sent 250 ok");             
+submit_delivery("testas5\@gmail.com","UID1122","10.0.0.1","appX","sent 250 ok");             

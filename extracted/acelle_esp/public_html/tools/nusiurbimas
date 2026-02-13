@@ -1,0 +1,6 @@
+#!/bin/sh
+cd $HOME/public_html/tools
+rm -f raportas.txt
+scp -r root@pma.parkagency.net:/home/app/public_html/tools/raportas.txt .
+./update_bounces
+

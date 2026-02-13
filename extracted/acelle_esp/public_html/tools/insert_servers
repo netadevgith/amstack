@@ -1,0 +1,70 @@
+#!/usr/bin/perl -w
+# insert servers script
+use strict;
+use warnings;
+use DBI;
+use Redis;
+use Data::Dumper;
+use Time::localtime;
+use JSON::XS;
+my $dbh;
+my %env; # variable to put laravel settings in
+my %settings = ();
+my $name_prefix = "smtp ";
+
+sub timestamp {
+  my $t = localtime;
+  return sprintf( "%04d-%02d-%02d_%02d:%02d:%02d",
+                  $t->year + 1900, $t->mon + 1, $t->mday,
+                  $t->hour, $t->min, $t->sec );
+}
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:database=".$env{DB_DATABASE}.";host=".$env{DB_HOST}.";port=".$env{DB_PORT}, $env{DB_USERNAME}, $env{DB_PASSWORD},{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+# auto_change_domain(campaign_uid);
+sub insert_server {
+my ($ipas, $hostas,$postfix) = @_;
+my @set = ('0' ..'12', 'A' .. 'F');
+my $uid = join '' => map $set[rand @set], 1 .. 12;
+my $created = timestamp();
+my $sta = $dbh->prepare("INSERT INTO sending_servers (uid,customer_id,name,type,host,smtp_port,smtp_protocol,quota_value,quota_base,status,created_at,updated_at) VALUES(?,'1',?, 'smtp', ?, '2525','','-1','-1','active',? ,?)");
+$sta->execute($uid,$name_prefix.$hostas." ".$postfix,$ipas,$created,$created);
+}
+
+read_lavonelis();
+dbconn();
+my $import_file = "insert_servers.txt";
+
+
+sub start_insert {
+open(my $fh, '<:encoding(UTF-8)', $import_file) or die "Could not open file '$import_file' $!";
+    while (my $row = <$fh>) {
+      chomp $row;
+     my @words = split / - /, $row; # SPLIT " - "
+     insert_server($words[0],$words[1],$words[2]);
+    }
+
+}
+
+
+start_insert();
+#insert_server("mail.abrosend.info","postfix-6");
+
+

@@ -1,0 +1,99 @@
+version: "3.8"
+
+services:
+  # MariaDB 10.1 (matching production Ubuntu 18.04 version)
+  mariadb:
+    image: mariadb:10.1
+    container_name: esp_mariadb
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password_esp
+      MYSQL_DATABASE: mailsendas_testdev
+      MYSQL_USER: app
+      MYSQL_PASSWORD: app_password_local
+    ports:
+      - "3307:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+      - ./docker/mariadb-init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    command: --max_allowed_packet=64M --innodb_buffer_pool_size=128M --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    networks:
+      esp_net:
+        ipv4_address: 172.28.0.2
+
+  # Redis (AOF persistence enabled so campaign data survives container restarts)
+  redis:
+    image: redis:5-alpine
+    container_name: esp_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      esp_net:
+        ipv4_address: 172.28.0.3
+
+  # Main application (Ubuntu 18.04 with PHP, Go, Perl)
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: esp_app
+    restart: unless-stopped
+    depends_on:
+      - mariadb
+      - redis
+    ports:
+      - "8090:80"       # Laravel web UI
+      - "8091:8082"     # Storage API
+      - "8092:8083"     # Storage links
+    volumes:
+      - app_storage:/home/app/public_html/storage
+      - ./extracted/acelle_esp/public_html/tools:/home/app/public_html/tools
+    environment:
+      DB_HOST: 172.28.0.2
+      DB_DATABASE: mailsendas_testdev
+      DB_USERNAME: app
+      DB_PASSWORD: app_password_local
+      DB_PORT: "3306"
+      REDIS_HOST: 172.28.0.3
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: "null"
+      # Cloudflare DNS management (optional — set your real values to enable)
+      CLOUDFLARE_ENABLED: "false"
+      CLOUDFLARE_EMAIL: ""
+      CLOUDFLARE_APIKEY: ""
+    networks:
+      esp_net:
+        ipv4_address: 172.28.0.10
+
+  # Storage database (separate for storage service)
+  storage_db:
+    image: mariadb:10.1
+    container_name: esp_storage_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root_password_storage
+      MYSQL_DATABASE: storage
+      MYSQL_USER: stor_user
+      MYSQL_PASSWORD: stor_password_local
+    volumes:
+      - storage_db_data:/var/lib/mysql
+    networks:
+      esp_net:
+        ipv4_address: 172.28.0.4
+
+networks:
+  esp_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  mariadb_data:
+  redis_data:
+  app_storage:
+  storage_db_data:

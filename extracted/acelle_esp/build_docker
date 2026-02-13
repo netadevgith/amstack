@@ -1,0 +1,5 @@
+#!/bin/sh
+
+docker login registry.gitlab.lt -ujustas -pnvFz8KHf6a6JcoGtHRmd
+docker build -t registry.gitlab.lt/personicus/acelle/image:latest -f docker/Dockerfile --no-cache=true .
+docker push registry.gitlab.lt/personicus/acelle/image

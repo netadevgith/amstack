@@ -1,0 +1,8 @@
+#!/bin/bash
+
+sssh(){
+  # try to connect every 0.5 secs (modulo timeouts)
+  while true; do command ssh "$@"; [ $? -eq 0 ] && break || sleep 0.5; done
+}
+
+sssh "$@"

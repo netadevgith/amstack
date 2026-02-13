@@ -1,0 +1,95 @@
+#!/usr/bin/perl -w
+
+use strict;
+use warnings;
+use Data::Dumper;
+use DBI;
+my %env;
+my $dbh;
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+read_lavonelis();
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+dbconn();
+
+my %email;
+sub get_email_info {
+my ($email) = @_;
+my $sth = $dbh->prepare("SELECT id, mail_list_id, email FROM subscribers where email like ?");
+$sth->execute($email);
+my $results = $sth->fetchall_arrayref({});
+$sth->finish();
+return $results;
+}
+
+sub get_random {
+my ($from) = @_;
+open TRC, $ENV{"HOME"}."/public_html/tools/trackinginfo.txt" || die "Neatidarau trackinginfo.txt failo :(\n";
+my @array=<TRC>;
+close TRC;
+my $randomline=$array[rand @array];
+chomp($randomline);
+my @track = split /:/, $randomline;
+# check if next item is not a current
+if (@track && $from ne $track[1]) {
+return @track;
+} else {
+get_random($from);
+}
+}
+
+sub change_campaign_info {
+my ($cmpid) = @_;
+my $sth = $dbh->prepare("SELECT name, html, plain, from_email, reply_to FROM campaigns where id = ?");
+$sth->execute($cmpid);
+my $campaigns = $sth->fetchall_arrayref({});
+print "[INFO] Changing campaign: @$campaigns[0]->{name} - @$campaigns[0]->{from_email} - @$campaigns[0]->{reply_to} info\n";
+my @trc = get_random(@$campaigns[0]->{from_email});
+my $html = @$campaigns[0]->{html};
+my $plain = @$campaigns[0]->{plain};
+$html =~ s/(http|https|ftp|ftps)\:\/\/[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,5}(\:[0-9]+)?\/?/http:\/\/$trc[0]\//g;
+$plain =~ s/(http|https|ftp|ftps)\:\/\/[a-zA-Z0-9\-\.]+\.[a-zA-Z]{2,5}(\:[0-9]+)?\/?/http:\/\/$trc[0]\//g;
+my $from = $trc[1];
+my $reply = $trc[1];   
+my $stha = $dbh->prepare("UPDATE campaigns set html = ?, plain = ?, from_email = ?, reply_to = ? where id = ?");
+$stha->execute($html,$plain,$from,$reply,$cmpid);
+print "[INFO] Changed to: $from and $reply\n";
+}
+
+sub detect_campaign {
+my ($maillist_id) = @_;
+my $sth = $dbh->prepare("SELECT campaign_id FROM campaigns_lists_segments where mail_list_id = ?");
+$sth->execute($maillist_id);
+my $campaign = $sth->fetchall_arrayref({});
+for my $camp (@$campaign) {
+change_campaign_info($camp->{campaign_id});
+}
+}
+
+read_lavonelis();
+if (defined($ARGV[0])) {
+my $email = get_email_info($ARGV[0]);
+print "[INFO] Examining $ARGV[0]...\n";
+for my $row (@$email) {
+detect_campaign($row->{mail_list_id});
+}
+#
+} else {
+print "Use: $0 <email>\n";
+}

@@ -1,0 +1,2 @@
+@include('helpers.form_control', ['type' => 'text', 'name' => 'email', 'label' => 'Email', 'value' => ''])
+@include('helpers.form_control', ['type' => 'text', 'name' => 'comment', 'label' => 'Comment', 'value' => ''])

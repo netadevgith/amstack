@@ -1,0 +1,23 @@
+{
+        "MySQLHost" : "",
+	"MySQLPort" : "",
+	"MySQLUser" : "",
+	"MySQLPassword" : "",
+	"MySQLDb" : "",
+        "Logging" : true,
+        "Threaded" : true,
+        "MinSpeed" : 8000,
+        "UseNewEngine" : true,
+        "UseTrackingHeaders": false,
+        "RandomHtmlTags": true,
+        "Algorithm": {"1":"s", "2":"m", "3":"z", "4":"c", "5":"k", "6":"e", "7":"r", "8":"l", "9":"o", "0":"p", "u":"a"},
+        "TrackTag": "Campuid",
+        "Debug": true,
+        "EnableStorageApi": true,
+        "StorageUrl": "http://78.46.73.84:8081/",
+        "StorageKey": "Ab0Zb1zB04mP",
+        "StorageTimeout": 60,
+        "EnableLinker": false,
+        "LinkerUrl": "http://88.99.165.162:8082/",
+        "LinkerKey": "Ab0Zb1zB04mP"
+}

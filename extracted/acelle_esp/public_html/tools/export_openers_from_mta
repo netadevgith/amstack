@@ -1,0 +1,56 @@
+#!/usr/bin/perl -w
+# export openers/clickers script
+use strict;
+use warnings;
+use DBI;
+use Redis;
+use Data::Dumper;
+#use Time::localtime;
+use JSON::XS;
+#use IO::Handle;
+use POSIX;
+use File::Basename;
+my $outfile = "be_openers.txt";
+my $prefix = "%arcor.de";
+
+my $table = 'app1_openai';
+
+
+
+my $dbh;
+my %env; # variable to put laravel settings in
+my %settings = ();
+my $db_user = "ses_remote";
+my $db_host = "pma.parkagency.net";
+my $db_db = "trackingas";
+my $db_pass = "bGh9CaF897q";
+ my $script_dir = undef;
+  if(-l __FILE__) {
+    $script_dir = dirname(readlink(__FILE__));
+  }
+  else {
+    $script_dir = dirname(__FILE__);
+  }
+my $outas;
+sysopen($outas, $script_dir."/".$outfile, O_APPEND | O_CREAT | O_RDWR) or die;
+$outas->autoflush(1);
+
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$db_db.":".$db_host, $db_user, $db_pass ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+dbconn();
+
+
+my $sth = $dbh->prepare("select email from $table where mx like '%telenet-ops.be%'");
+$sth->execute();
+my $rows = $sth->rows;
+my $subscribers = $sth->fetchall_arrayref({});
+my $cnt = 0;
+for my $subscriber (@$subscribers) {
+$cnt++;
+print "Processing export $cnt of $rows\r";
+printf $outas $subscriber->{email}."\n";
+}
+print "\nExport done!\n";

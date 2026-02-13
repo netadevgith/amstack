@@ -1,0 +1,94 @@
+#!/usr/bin/perl -w
+# apt install libjson-xs-perl
+# this script opens ip_addr file, lists all the ip addresses, and setup new random dnsses using new domain
+# and writes them in the ip-addr2 file
+
+my $failas = "ip_addr";
+use strict;
+use warnings;
+use JSON::XS;
+use Math::Round;
+use File::Basename;
+my $api = "http://devtest.parkagency.org/api/";
+use Mojo::UserAgent;
+my $ua  = Mojo::UserAgent->new;
+Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
+my @ips;
+my @domains;
+my $scriptdir = undef;
+$scriptdir = dirname($0);
+
+sub setup_dns {
+my ($ip,$domain) = @_;
+my $json;
+while (1) {
+my $tx = $ua->post($api.'initializedns' => form => { 'api_key' => 1122, 'domain' => $domain, 'ip' => $ip });
+if (defined($tx->{res}{content}{asset}{content})&&$tx->{res}{content}{asset}{content} ne "") {
+$json = decode_json($tx->{res}{content}{asset}{content});
+last if (defined($json));
+print "Got problems in getting json from initialize dns api\n";
+}
+#sleep(5);
+}
+if ($json->{status} == 1) {
+#print "We got added the dns record: $json->{subdomain}\n";
+} else {
+print "We have failed to add dns record for ip $ip\n";
+return;
+}
+if (defined($json->{subdomain})) {
+#print "We have done setting up $json->{subdomain} for $ip\n";
+writefile("$ip $json->{subdomain}");
+}
+}
+
+sub writefile {
+my ($txt) = @_;
+open(my $fh, '>>', $scriptdir ."/".$failas);
+print $fh $txt."\n";
+close $fh;
+}
+
+sub init {
+unlink($scriptdir."/ip_addr") if (-e $scriptdir."/ip_addr");
+}
+
+sub foreachips {
+my ($domains_count,$ipcount) = @_;
+my $split_div = round($ipcount / $domains_count);
+print "We need to change domain every $split_div ips\n";
+my $interval_counter = 0;
+my $counter = 0;
+foreach my $ip (@ips) {
+if ($counter == $split_div) {
+$interval_counter++;
+$counter = 0;
+}
+#print "We got ip: $ip -> $ARGV[$interval_counter]\n";
+setup_dns($ip,$ARGV[$interval_counter]);
+$counter++;
+}
+}
+
+# init()
+my $hostnames = `hostname -I`;
+my @values = split(' ', $hostnames);
+my $ipcount = 0;
+foreach my $val (@values) {
+next if ($val =~ /127.0.0/);
+$ipcount++;
+# only add valid ip addresses to the list
+push @ips, $val;
+}
+print "We detected $ipcount ip addresses on this machine\n";
+
+my $args_count = 0;
+foreach my $a(@ARGV) {
+#    print "Arg # $counter : $a\n";
+push @domains, $a;
+    $args_count++;
+}
+print "We detected that $args_count domains passed as dns arguments\n";
+
+init();
+foreachips($args_count,$ipcount);

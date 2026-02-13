@@ -1,0 +1,59 @@
+#!/usr/bin/perl -w
+# TODO, FIRST MAKE SURE ALL THE SERVERS HOSTS USE THE IP ADDRESSES
+# YOU CAN RUN CONVERSION SCRIPT:
+# ./convert_servers_to_ips
+use File::Basename;
+my $path = dirname(__FILE__);
+my $output = $path."/output_blacklisted.txt";
+use strict;
+use warnings;
+use DBI;
+my $dbh;
+my %env; # variable to put laravel settings in
+my %settings = ();
+
+
+sub mark_ip {
+ my ($ip) = @_;
+# TODO
+print "Blogas: $ip\n";
+my $sth = $dbh->prepare("UPDATE sending_servers set cloudmark = now() where host = ?");
+$sth->execute($ip);
+}
+
+sub read_lavonelis {
+# example $env{DB_PASSWORD}
+open INI, $ENV{"HOME"}."/public_html/.env"||die "Neatidarau lavonelio aplinkos failo :(\n";
+while (<INI>) {
+chomp;
+if (/^\W*(\w+)=?(\w.+)\W*(#.*)?$/) {
+my $setting = $1; # setting
+#chomp($setting);
+my $value = $2; # value
+$env{$setting} = $value;
+} # end if regex
+} # end while
+close INI;
+} # end read lavonelis
+
+sub dbconn {
+$dbh = DBI->connect("DBI:mysql:".$env{DB_DATABASE}.":".$env{DB_HOST}, $env{DB_USERNAME}, $env{DB_PASSWORD} ,{ PrintError => 1, RaiseError => 0 }) or die "Unable to connect to MySQL\n";
+}
+
+read_lavonelis();
+dbconn();
+
+# parsiunciam textus susortinam ir sudedam unikalius i viena faila
+# 185.253.62.4 185.253.63.4
+system("~/public_html/tools/ssh -l root 185.253.62.4 \"cat output_blacklisted.txt | sort|uniq\" > $path/output_blacklisted.txt");
+system("~/public_html/tools/ssh -l root 185.253.63.4 \"cat output_blacklisted.txt | sort|uniq\" >> $path/output_blacklisted.txt");
+
+print "Files have been transferred!\n";
+if (-e "$path/output_blacklisted.txt") {
+open(my $fh, '<:encoding(UTF-8)', $output) or die "Could not open file '$output' $!";
+while (my $row = <$fh>) {
+  chomp $row;
+  mark_ip($row);
+  }
+close($fh);
+}

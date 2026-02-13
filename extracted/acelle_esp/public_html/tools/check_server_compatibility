@@ -1,0 +1,149 @@
+#!/usr/bin/perl -w
+# prereq: apt install libnet-openssh-perl libio-pty-perl
+my $version = "1.0";
+use strict;
+use warnings;
+use Getopt::Long;
+use POSIX "setsid";
+use Net::OpenSSH;
+use JSON::XS;
+
+my $host;
+my $username = 'root';
+my $password;
+my $port = 22;
+
+my %opt = (
+                "help" => 0,
+        );
+
+
+# Gather the options from the command line
+GetOptions(\%opt,
+                'host=s' => \$host,
+                'user=s' => \$username,
+                'pass=s' => \$password,
+                'port=i' => \$port,
+                'help',
+        );
+
+
+my %args = (
+  user      => $username,
+  password  => $password,
+  port      => $port,
+  autodie   => 0,
+  timeout   => 10,
+  autoflush => 1,
+);
+
+
+sub usage {
+        # Shown with --help option passed
+        print "\n".
+                "   check_server_compatibility $version - Checks if possible to install postfix to the target server\n".
+                "   Bug reports, feature requests\n".
+                "\n".
+                "   Options\n".
+                "      --host       Remote machine host\n".
+                "      --user       Remote machine ssh username\n".
+                "      --pass       Remote machine ssh password\n".
+                "      --port       Remote machine port (Default 22)\n".
+                "\n";
+        exit;
+}
+
+
+
+if (defined($host)&&defined($username)&&defined($password)&&defined($port)) {
+# hack
+system('ssh-keygen -f "'.$ENV{"HOME"}.'/.ssh/known_hosts" -R '.$host);
+print "Connecting to server: $host\n";
+my $ssh;
+if ($password eq "key") {
+$ssh = Net::OpenSSH->new(host=>$host, user=>$username, 
+                port=>$port, 
+                key_path => '~/.ssh/id_rsa',master_opts => [-o => "StrictHostKeyChecking=no"]);
+
+} else { 
+$ssh = Net::OpenSSH->new("$username:$password\@$host:$port",master_opts => [-o => "StrictHostKeyChecking=no"], timeout => 30);
+}
+   my $res = $ssh->error;
+   chomp $res;
+if ($ssh->error) {
+   print "Unable to connect to $host!\n";
+   my $serv->{msg} = "Unable to connect to $host error: ".$ssh->error;
+   $serv->{os} = "Unknown";
+   $serv->{valid} = 0;
+   $serv->{multi} = "";
+   my $json = encode_json($serv);
+   print "JSON: $json\n";
+   exit(12);
+   } else {
+   print "Connected\n";
+   my $serv->{hostname} = $host;
+   $serv->{username} = $username;
+   $serv->{password} = $password;
+   $serv->{port} = $port;
+   print "Checking ip addresses in host...\n";
+   my @ips;
+   my ($multi, $err) = $ssh->capture2("hostname -I");
+   my @values = split(' ', $multi);
+   my $ipcount = 0;
+   foreach my $val (@values) {
+       next if ($val =~ /127.0.0/);
+       next if ($val =~ /:/);
+       $ipcount++;
+#       print "$ipcount Got ip: $val\n";
+       # only add valid ip addresses to the list
+       push @ips, $val;
+   }
+# for production should be set to 2
+   if ($ipcount > 1) {
+   $serv->{multi} = 1;
+   $serv->{ips} = \@ips;
+   } else {
+   $serv->{multi} = 0;
+   $serv->{ips} = undef;
+   }
+   print "We detected $ipcount ip addresses on this machine\n";
+   print "Checking operating system version...\n";
+   my $rhel = $ssh->pipe_out('if [[ -e /etc/redhat-release ]]; then cat /etc/redhat-release; fi');
+        while(<$rhel>) {
+              if ($_ =~ /(CentOS|redhat)/) {
+              print "Unsupported operating system detected on the target $host host: $_\n";
+              $serv->{msg} = "$_ based GNU/Linux distribution detected on the target $host system!";
+              $serv->{os} = "redhat";
+              $serv->{valid} = 1;
+              my $json = encode_json($serv);
+              print "JSON: $json\n";
+              exit(0);
+              }
+        }
+   my $debian = $ssh->pipe_out('if [[ -e /etc/os-release ]]; then cat /etc/os-release; fi');
+     while(<$debian>) {
+              if ($_ =~ /(Debian|Ubuntu)/) {
+              print "$_ based GNU/Linux distribution detected on the target $host system!\n";
+              $serv->{msg} = "$_ based GNU/Linux distribution detected on the target $host system!";
+              $serv->{os} = "debian";
+              $serv->{valid} = 1;
+              my $json = encode_json($serv);
+              print "JSON: $json\n";
+              exit(0);
+              }
+        }
+
+$serv->{msg} = "Unsupported operating system detected on the target $host host: Unknown";
+$serv->{os} = "Unknown";
+$serv->{valid} = 0;
+my $json = encode_json($serv); 
+print "JSON: $json\n";
+print "Unsupported operating system detected on the target $host host: Unknown\n";
+exit(13);
+
+}
+} else {
+if (defined $opt{'help'} && $opt{'help'} == 1) { usage(); }
+print "You must provide the correct parameters for this application\n";
+exit(15);
+}
