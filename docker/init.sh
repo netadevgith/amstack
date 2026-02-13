@@ -89,6 +89,8 @@ chmod -R 775 /home/app/public_html/storage /home/app/public_html/bootstrap/cache
 mkdir -p /home/app/public_html/storage/logs
 mkdir -p /home/app/public_html/storage/framework/{sessions,views,cache}
 mkdir -p /home/app/public_html/public/source
+# Mark app as installed (prevents redirect to /install/ wizard)
+touch /home/app/public_html/storage/app/installed
 chown -R www-data:www-data /home/app/public_html/storage
 chown -R www-data:www-data /home/app/public_html/public/source
 echo "  Permissions set."
