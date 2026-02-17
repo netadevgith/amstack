@@ -63,8 +63,13 @@ sed -i "s|REDIS_HOST=.*|REDIS_HOST=${REDIS_HOST}|" .env
 sed -i "s|REDIS_PORT=.*|REDIS_PORT=${REDIS_PORT}|" .env
 sed -i "s|REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASSWORD}|" .env
 
-# Update app URL for local
-sed -i "s|APP_URL=.*|APP_URL=http://localhost|" .env
+# Update app URL (detect external IP or use APP_URL env var)
+if [ -n "${APP_URL}" ]; then
+    sed -i "s|APP_URL=.*|APP_URL=${APP_URL}|" .env
+else
+    EXTERNAL_IP=$(curl -s --connect-timeout 5 http://ifconfig.me 2>/dev/null || echo "localhost")
+    sed -i "s|APP_URL=.*|APP_URL=http://${EXTERNAL_IP}|" .env
+fi
 
 # Update Cloudflare settings (if provided via Docker environment)
 if [ -n "${CLOUDFLARE_ENABLED}" ]; then
@@ -93,6 +98,20 @@ mkdir -p /home/app/public_html/public/source
 touch /home/app/public_html/storage/app/installed
 chown -R www-data:www-data /home/app/public_html/storage
 chown -R www-data:www-data /home/app/public_html/public/source
+
+# Fix www-data SSH access (needed by debian_proxy for proxy setup via UI)
+mkdir -p /var/www/.ssh
+chown www-data:www-data /var/www /var/www/.ssh
+chmod 700 /var/www/.ssh
+
+# Fix nginx real_ip.conf permissions (SettingController writes proxy IPs here)
+touch /etc/nginx/real_ip.conf
+chmod 666 /etc/nginx/real_ip.conf
+
+# Symlink tools dir for www-data ($HOME=/var/www for php-fpm)
+mkdir -p /var/www/public_html
+ln -sf /home/app/public_html/tools /var/www/public_html/tools
+
 echo "  Permissions set."
 
 # ---- Restore incomplete vendor packages ----
