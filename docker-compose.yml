@@ -63,8 +63,8 @@ services:
       REDIS_PASSWORD: "null"
       # Cloudflare DNS management
       CLOUDFLARE_ENABLED: "true"
-      CLOUDFLARE_EMAIL: "info@netadev.com"
-      CLOUDFLARE_APIKEY: "901c963adb3c800a28809d64f0ff7fddbad6e"
+      CLOUDFLARE_EMAIL: "quickrelay@proton.me"
+      CLOUDFLARE_APIKEY: "90f3a853eca2d792b816312214f1e474730d7"
     networks:
       esp_net:
         ipv4_address: 172.28.0.10
