@@ -465,6 +465,7 @@ tracking_logs.message_id = click_logs.message_id inner join campaigns_lists_segm
         $this->status = self::STATUS_DONE;
         $this->save();
         $camp = json_decode(Redis::get($this->uid));
+        if (!$camp) $camp = (object)[];
         $camp->status = self::STATUS_DONE;
         Redis::set($this->uid,json_encode($camp));
     }
@@ -478,6 +479,7 @@ tracking_logs.message_id = click_logs.message_id inner join campaigns_lists_segm
         $this->delivery_at = \Carbon\Carbon::now();
         $this->save();
         $camp = json_decode(Redis::get($this->uid));
+        if (!$camp) $camp = (object)[];
         $camp->status = self::STATUS_SENDING;
         Redis::set($this->uid,json_encode($camp));
     }
@@ -487,6 +489,7 @@ tracking_logs.message_id = click_logs.message_id inner join campaigns_lists_segm
         $this->status = self::STATUS_PREPARING;
         $this->save();
         $camp = json_decode(Redis::get($this->uid));
+        if (!$camp) $camp = (object)[];
         $camp->status = self::STATUS_PREPARING;
         Redis::set($this->uid,json_encode($camp));
     }
@@ -543,6 +546,7 @@ tracking_logs.message_id = click_logs.message_id inner join campaigns_lists_segm
         $this->status = self::STATUS_READY;
         $this->save();
         $camp = json_decode(Redis::get($this->uid));
+        if (!$camp) $camp = (object)[];
         $camp->status = self::STATUS_READY;
         Redis::set($this->uid,json_encode($camp));
     }
@@ -556,6 +560,7 @@ tracking_logs.message_id = click_logs.message_id inner join campaigns_lists_segm
         $this->last_error = $error;
         $this->save();
         $camp = json_decode(Redis::get($this->uid));
+        if (!$camp) $camp = (object)[];
         $camp->status = self::STATUS_ERROR;
         $camp->last_error = $error;
         Redis::set($this->uid,json_encode($camp));
@@ -571,6 +576,7 @@ tracking_logs.message_id = click_logs.message_id inner join campaigns_lists_segm
         $this->status = $me->status;
         $this->save();
         $camp = json_decode(Redis::get($this->uid));
+        if (!$camp) $camp = (object)[];
         $camp->status = $me->status;
         Redis::set($this->uid,json_encode($camp));
         return $this;
