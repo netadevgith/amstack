@@ -112,6 +112,13 @@ chmod 666 /etc/nginx/real_ip.conf
 mkdir -p /var/www/public_html
 ln -sf /home/app/public_html/tools /var/www/public_html/tools
 
+# Download GeoLite2 database for IP geolocation (if not present)
+if [ ! -f /usr/share/GeoIP/GeoLite2-City.mmdb ]; then
+    echo "  Downloading GeoLite2-City.mmdb..."
+    mkdir -p /usr/share/GeoIP
+    wget -q https://raw.githubusercontent.com/P3TERX/GeoLite.mmdb/download/GeoLite2-City.mmdb -O /usr/share/GeoIP/GeoLite2-City.mmdb 2>/dev/null || echo "  Warning: Could not download GeoLite2-City.mmdb"
+fi
+
 echo "  Permissions set."
 
 # ---- Restore incomplete vendor packages ----
