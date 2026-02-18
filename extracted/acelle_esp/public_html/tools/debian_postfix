@@ -13,22 +13,13 @@ use POSIX ":sys_wait_h";
 use Time::HiRes qw(sleep);
 use Socket;
 use Time::localtime;
-use Mojo::UserAgent;
 use File::Basename;
 my $scriptdir = undef;
 $scriptdir = dirname($0);
-my $ua  = Mojo::UserAgent->new;
-Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
-my $mta_api = 'http://mta.parkagency.org/api.php';
 
 sub inject_text {
 my ($destination,$text) = @_;
 
-}
-
-sub server_to_api {
-my ($host,$sshport,$sshusername,$sshpassword,$smtpport) = @_;
-#$ua->post($mta_api.'?addserver&post=1' => {Accept => '*/*'} => form => { 'type' => 'postfix', 'host' => $host, 'sshport' => $sshport, 'sshusername' => $sshusername, 'sshpassword' => $sshpassword, 'smtpport' => $smtpport });
 }
 
 sub enable_root {
@@ -72,23 +63,38 @@ $ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => 
         # update sql records to preapared = 1
       }
       else {
-# upload fix
+# upload config files from local templates
 my $optz={recursive => 1, glob => 1, timeout => 1000, quiet => 0,stderr_to_stdout => 1};
+
+# upload minisvc if available (optional monitoring service)
+if (-e $scriptdir."/minisvc") {
 $ssh->scp_put($optz, $scriptdir."/minisvc","/usr/local/bin/minisvc");
 $ssh->scp_put($optz, $scriptdir."/minisvc.service","/etc/systemd/system/minisvc.service");
+print "Uploaded minisvc service\n";
+} else {
+print "minisvc not found, skipping (optional)\n";
+}
+
       # prepare the host
         print "postfix is being installed on $username\@$ip\n";
+        my $minisvc_cmd = "";
+        if (-e $scriptdir."/minisvc") {
+            $minisvc_cmd = "chmod +x /usr/local/bin/minisvc;systemctl enable minisvc;systemctl restart minisvc;";
+        }
         my $out = $ssh->system(
-#debconf-set-selections <<< \"postfix postfix/mailname string $ip\"&&");
-   #     "debconf-set-selections <<< \"postfix postfix/main_mailer_type string 'Internet Site'\"&&".
-        "/usr/bin/apt-get -y update;DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get -y install sudo postfix wget nano cron;chmod +x /usr/local/bin/minisvc;systemctl enable minisvc;systemctl restart minisvc;".
-        "/usr/bin/wget parkagency.org/post/post_cleaner -O /etc/postfix/post_cleaner&&".
-        "chmod +x /etc/postfix/post_cleaner&&".
-        "echo \"* * * * * root /etc/postfix/post_cleaner\" >> /etc/crontab&&".
-        "/usr/bin/wget parkagency.org/post/main.cf -O /etc/postfix/main.cf&&".
-        "/usr/bin/wget parkagency.org/post/aliases -O /etc/aliases&&newaliases&&".
-       "/usr/bin/wget parkagency.org/post/master.cf -O /etc/postfix/master.cf&&".
-      "/usr/bin/wget parkagency.org/post/header_checks -O /etc/postfix/header_checks");
+        "/usr/bin/apt-get -y update;DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get -y install sudo postfix wget nano cron;".$minisvc_cmd);
+
+# upload postfix config files from local templates
+$ssh->scp_put($optz, $scriptdir."/postfix_configs/post_cleaner","/etc/postfix/post_cleaner");
+$ssh->system("chmod +x /etc/postfix/post_cleaner");
+$ssh->system("echo \"* * * * * root /etc/postfix/post_cleaner\" >> /etc/crontab");
+$ssh->scp_put($optz, $scriptdir."/postfix_configs/main.cf","/etc/postfix/main.cf");
+$ssh->scp_put($optz, $scriptdir."/postfix_configs/master.cf","/etc/postfix/master.cf");
+$ssh->scp_put($optz, $scriptdir."/postfix_configs/aliases","/etc/aliases");
+$ssh->system("newaliases");
+$ssh->scp_put($optz, $scriptdir."/postfix_configs/header_checks","/etc/postfix/header_checks");
+print "Uploaded all postfix config files from local templates\n";
+
 # HANDLE IPs
 my ($out3, $errput) = $ssh->capture2({timeout => 1}, "hostname -I");
 chomp($out3);
@@ -101,16 +107,14 @@ $count++;
 if ($count == 1) {
 print "Injecting postfix config with $ipas...\n";
 my $out4 = $ssh->system("sed -i '/inet_interfaces/d' /etc/postfix/main.cf&&echo \"inet_interfaces = $ipas\" >> /etc/postfix/main.cf");
-# setupinam hosto prieima
+# setup hostname
 my $out5 = $ssh->system("sed -i 's/SITASHOSTAS/$ipas/' /etc/postfix/main.cf");
-# setupinam ptr
+# setup ptr/hostname
 my $out6 = $ssh->system("sed -i 's/BANERIS/$hostname/' /etc/postfix/main.cf");
-# post the new server to the mta api
-server_to_api($ip,22,$username,$password,2525);
 }
 }
 # end handle
-       my $out2 = $ssh->system("/etc/init.d/postfix restart&&".        
+       my $out2 = $ssh->system("/etc/init.d/postfix restart&&".
         "if pgrep -x \"master\" > /dev/null; then true; else false; fi");
          my $err = $ssh->error;
          if ($err eq '0') {

@@ -1,0 +1,7 @@
+/^Received: .*/ IGNORE
+/^User-Agent:/  IGNORE
+/^X-Mailer:/    IGNORE
+/^X-Originating-IP:/  IGNORE
+/^X-Acelle-.*/ IGNORE
+/^Campuid:/     IGNORE
+/^Osver:/       IGNORE

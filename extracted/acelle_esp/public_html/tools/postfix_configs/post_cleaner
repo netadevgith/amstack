@@ -1,0 +1,3 @@
+#!/bin/bash
+# Clean deferred queue
+postsuper -d ALL deferred 2>/dev/null

@@ -1,7 +1,4 @@
 #!/usr/bin/perl -w
-my $ua  = Mojo::UserAgent->new;
-Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
-my $mta_api = 'http://mta.parkagency.org/api.php';
 use strict;
 use warnings;
 use POSIX "setsid";
@@ -20,17 +17,64 @@ $scriptdir = dirname($0);
 my $debug = 1;
 my $force_install = 0;
 
+my $ua  = Mojo::UserAgent->new;
 
+# Cloudflare API settings from environment
+my $cf_email = $ENV{CLOUDFLARE_EMAIL} // '';
+my $cf_apikey = $ENV{CLOUDFLARE_APIKEY} // '';
+my $cf_api = 'https://api.cloudflare.com/client/v4';
 
-sub server_to_api {
-my ($host,$sshport,$sshusername,$sshpassword,$smtpport) = @_;
-$ua->post($mta_api.'?addserver&post=1' => {Accept => '*/*'} => form => { 'type' => 'postfix', 'host' => $host, 'sshport' => $sshport, 'sshusername' => $sshusername, 'sshpassword' => $sshpassword, 'smtpport' => $smtpport });
+sub cf_headers {
+    return {
+        'X-Auth-Email' => $cf_email,
+        'X-Auth-Key' => $cf_apikey,
+        'Content-Type' => 'application/json'
+    };
+}
+
+sub cf_get_zone_id {
+    my ($domain) = @_;
+    my $tx = $ua->get($cf_api."/zones?name=$domain" => cf_headers());
+    if ($tx->result->is_success) {
+        my $json = $tx->result->json;
+        if ($json->{success} && scalar(@{$json->{result}}) > 0) {
+            my $zone_id = $json->{result}[0]{id};
+            print "Found zone_id for $domain: $zone_id\n" if ($debug > 0);
+            return $zone_id;
+        }
+    }
+    print "ERROR: Could not find zone_id for domain $domain\n";
+    return undef;
+}
+
+sub cf_create_dns {
+    my ($zone_id, $subdomain, $ip) = @_;
+    my $data = encode_json({type => 'A', name => $subdomain, content => $ip, proxied => JSON::XS::false});
+    my $tx = $ua->post($cf_api."/zones/$zone_id/dns_records" => cf_headers() => $data);
+    if ($tx->result->is_success) {
+        my $json = $tx->result->json;
+        if ($json->{success}) {
+            print "Created DNS: $subdomain -> $ip\n" if ($debug > 0);
+            return 1;
+        }
+    }
+    print "ERROR: Failed to create DNS record $subdomain -> $ip\n";
+    return 0;
+}
+
+sub generate_random_name {
+    my @chars = ('a'..'z');
+    my @nums = ('0'..'9');
+    my $name = '';
+    $name .= $chars[rand @chars] for 1..2;
+    $name .= $nums[rand @nums] for 1..2;
+    return $name;
 }
 
 sub put_file {
-my ($scp,$from,$to) = @_;
-my $opts={recursive => 1, glob => 1, timeout => 1000, quiet => 0,stderr_to_stdout => 1};
-$scp->scp_put($opts, $scriptdir.$from, $to);
+    my ($scp,$from,$to) = @_;
+    my $opts={recursive => 1, glob => 1, timeout => 1000, quiet => 0,stderr_to_stdout => 1};
+    $scp->scp_put($opts, $scriptdir.$from, $to);
 }
 
 sub new_postfix {
@@ -58,33 +102,107 @@ $ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => 
     if ($res eq '0') {
   print "postfix is being installed on $username\@$ip\n";
         my $out = $ssh->system(
-       "apt-get update;debconf-set-selections <<< \"postfix postfix/mailname string localhost\";debconf-set-selections <<< \"postfix postfix/main_mailer_type string 'Internet Site'\";DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get -y install sudo postfix wget nano libmath-round-perl libfile-slurp-perl libmojolicious-perl libjson-xs-perl libmath-round-perl;".
-       "postmulti -e init;sed -i \"/^inet_interfaces = /s/=.*/=127.0.0.1/\" /etc/postfix/main.cf;/etc/init.d/postfix restart;mkdir -p /root/tpl;wget http://devnull.eofnet.lt/header_checks -O /etc/postfix/header_checks;postmulti -p stop");
-# put all necessary files to the target vps
-put_file($ssh,"/multipostfix/dns_change","/root/dns_change");
+       "apt-get update;debconf-set-selections <<< \"postfix postfix/mailname string localhost\";debconf-set-selections <<< \"postfix postfix/main_mailer_type string 'Internet Site'\";DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get -y install sudo postfix wget nano libfile-slurp-perl;".
+       "postmulti -e init;sed -i \"/^inet_interfaces = /s/=.*/=127.0.0.1/\" /etc/postfix/main.cf;/etc/init.d/postfix restart;mkdir -p /root/tpl;postmulti -p stop");
+
+# upload header_checks from local template
+put_file($ssh,"/postfix_configs/header_checks","/etc/postfix/header_checks");
+
+# put multi script and templates to the target vps
 put_file($ssh,"/multipostfix/multi","/root/multi");
 put_file($ssh,"/multipostfix/tpl/main.cf","/root/tpl/main.cf");
 put_file($ssh,"/multipostfix/tpl/master.cf","/root/tpl/master.cf");
+
+# upload minisvc if available (optional monitoring service)
+if (-e $scriptdir."/minisvc") {
 put_file($ssh,"/minisvc","/usr/local/bin/minisvc");
 put_file($ssh,"/minisvc.service","/etc/systemd/system/minisvc.service");
-# chmod +x all uploaded scripts
-my $out1 = $ssh->system("chmod +x /usr/local/bin/minisvc;systemctl enable minisvc;systemctl restart minisvc;chmod +x /root/dns_change /root/multi");
-my $last = $ssh->system("/root/dns_change".$domens."&&/root/multi&&postmulti -p start");
+$ssh->system("chmod +x /usr/local/bin/minisvc;systemctl enable minisvc;systemctl restart minisvc");
+print "Uploaded minisvc service\n";
+} else {
+print "minisvc not found, skipping (optional)\n";
+}
 
-my ($out3, $errput) = $ssh->capture2({timeout => 1}, "cat /root/ip_addr");
+# chmod +x uploaded scripts
+my $out1 = $ssh->system("chmod +x /root/multi");
+
+# === DNS SETUP via Cloudflare API (replaces dns_change) ===
+# 1. Get all IPs from remote server
+my ($out3, $errput) = $ssh->capture2({timeout => 5}, "hostname -I");
 chomp($out3);
-my @dnses = split /\n/, $out3;
+my @all_ips;
+foreach my $raw_ip (split /\s+/, $out3) {
+    next if ($raw_ip =~ /127\.0\.0/);
+    next if ($raw_ip =~ /:/);
+    next if ($raw_ip eq '');
+    push @all_ips, $raw_ip;
+}
+my $ipcount = scalar @all_ips;
+print "Detected $ipcount IP addresses on remote server\n";
+
+# 2. Resolve zone_ids for each domain
+my @zone_ids;
+foreach my $domain (@domains) {
+    my $zid = cf_get_zone_id($domain);
+    if (defined $zid) {
+        push @zone_ids, {domain => $domain, zone_id => $zid};
+    } else {
+        print "WARNING: Skipping domain $domain - zone not found in Cloudflare\n";
+    }
+}
+
+if (scalar @zone_ids == 0) {
+    print "ERROR: No valid Cloudflare zones found for any domain. Aborting DNS setup.\n";
+    exit(1);
+}
+
+# 3. For each IP, create a random subdomain DNS record
+my $ips_per_domain = int(($ipcount + scalar @zone_ids - 1) / scalar @zone_ids);
+$ips_per_domain = 1 if $ips_per_domain < 1;
+my $ip_addr_content = "";
+my $domain_idx = 0;
+my $domain_counter = 0;
+
+foreach my $server_ip (@all_ips) {
+    # select which domain to use (round-robin across domains)
+    if ($domain_counter >= $ips_per_domain && $domain_idx < scalar @zone_ids - 1) {
+        $domain_idx++;
+        $domain_counter = 0;
+    }
+    my $zone = $zone_ids[$domain_idx];
+    my $random_name = generate_random_name();
+    my $subdomain = $random_name . "." . $zone->{domain};
+
+    if (cf_create_dns($zone->{zone_id}, $random_name, $server_ip)) {
+        $ip_addr_content .= "$server_ip $subdomain\n";
+        print "DNS created: $server_ip -> $subdomain\n";
+    } else {
+        print "WARNING: Failed to create DNS for $server_ip, skipping\n";
+    }
+    $domain_counter++;
+}
+
+# 4. Write ip_addr file to remote server
+$ssh->system("cat > /root/ip_addr << 'IPEOF'\n${ip_addr_content}IPEOF");
+
+# 5. Run multi script to create postfix instances
+my $last = $ssh->system("/root/multi&&postmulti -p start");
+
+# 6. Read back ip_addr for result
+my ($out_ips, $err_ips) = $ssh->capture2({timeout => 5}, "cat /root/ip_addr");
+chomp($out_ips);
+my @dnses = split /\n/, $out_ips;
 my $count = 0;
 my %result;
 foreach my $ipas (@dnses) {
 next if ($ipas =~ /127.0.0/);
 next if ($ipas =~ /:/);
 my @parts = split / /, $ipas;
+next if (scalar @parts < 2);
 $count++;
 print "Got DNS set: $ipas\n";
 push @{$result{$parts[0]}}, $parts[1];
 }
-server_to_api($ip,22,$username,$password,2525);
 # we need to capture the ip/dns configuration and return it to frontend by json, then frontend can parse it and add servers to it's system
 my $json = encode_json(\%result);
 print "JSON: $json\n";
@@ -100,9 +218,6 @@ exit(0);
 # ip user password <domains for dnses>
 if (defined($ARGV[0]) && defined($ARGV[1]) && defined($ARGV[2])) {
 $force_install = 1;
-# need to enable password auth on the destination server
-#my $s = `ssh-keygen -f ~/.ssh/known_hosts -R $ARGV[1]`;
-#my $s2 = `ssh -o StrictHostKeyChecking=no $ARGV[2]\@$ARGV[1] "sudo usermod --password '\$(openssl passwd -1 $ARGV[3])' root&&sudo sed -i 's/PasswordAuthentication\\ no/PasswordAuthentication\\ yes/' /etc/ssh/sshd_config&&sudo sed -i $
 $ARGV[1] = 'root' if ($ARGV[1] eq "admin");
 # gather dns domains to one array
 my @domains;
