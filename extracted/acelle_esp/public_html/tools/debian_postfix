@@ -87,16 +87,14 @@ print "minisvc not found, skipping (optional)\n";
 # upload postfix config files from local templates
 $ssh->scp_put($optz, $scriptdir."/postfix_configs/post_cleaner","/etc/postfix/post_cleaner");
 $ssh->system("chmod +x /etc/postfix/post_cleaner");
-$ssh->system("echo \"* * * * * root /etc/postfix/post_cleaner\" >> /etc/crontab");
+$ssh->system("grep -q 'post_cleaner' /etc/crontab || echo \"* * * * * root /etc/postfix/post_cleaner\" >> /etc/crontab");
 $ssh->scp_put($optz, $scriptdir."/postfix_configs/main.cf","/etc/postfix/main.cf");
 $ssh->scp_put($optz, $scriptdir."/postfix_configs/master.cf","/etc/postfix/master.cf");
-$ssh->scp_put($optz, $scriptdir."/postfix_configs/aliases","/etc/aliases");
-$ssh->system("newaliases");
 $ssh->scp_put($optz, $scriptdir."/postfix_configs/header_checks","/etc/postfix/header_checks");
 print "Uploaded all postfix config files from local templates\n";
 
-# HANDLE IPs
-my ($out3, $errput) = $ssh->capture2({timeout => 1}, "hostname -I");
+# HANDLE IPs - replace placeholders BEFORE newaliases
+my ($out3, $errput) = $ssh->capture2({timeout => 5}, "hostname -I");
 chomp($out3);
 my @ipai = split / /, $out3;
 my $count = 0;
@@ -106,13 +104,15 @@ next if ($ipas =~ /:/);
 $count++;
 if ($count == 1) {
 print "Injecting postfix config with $ipas...\n";
-my $out4 = $ssh->system("sed -i '/inet_interfaces/d' /etc/postfix/main.cf&&echo \"inet_interfaces = $ipas\" >> /etc/postfix/main.cf");
-# setup hostname
+# replace placeholders with actual values
 my $out5 = $ssh->system("sed -i 's/SITASHOSTAS/$ipas/' /etc/postfix/main.cf");
-# setup ptr/hostname
 my $out6 = $ssh->system("sed -i 's/BANERIS/$hostname/' /etc/postfix/main.cf");
 }
 }
+
+# setup aliases after config is ready
+$ssh->scp_put($optz, $scriptdir."/postfix_configs/aliases","/etc/aliases");
+$ssh->system("newaliases");
 # end handle
        my $out2 = $ssh->system("/etc/init.d/postfix restart&&".
         "if pgrep -x \"master\" > /dev/null; then true; else false; fi");
