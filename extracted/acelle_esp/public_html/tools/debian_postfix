@@ -17,6 +17,14 @@ use File::Basename;
 my $scriptdir = undef;
 $scriptdir = dirname($0);
 
+sub log_msg {
+    my ($level, $msg) = @_;
+    my $tm = localtime;
+    my $ts = sprintf("%04d-%02d-%02d %02d:%02d:%02d",
+        $tm->year+1900, $tm->mon+1, $tm->mday, $tm->hour, $tm->min, $tm->sec);
+    print "[$ts] [$level] $msg\n";
+}
+
 sub inject_text {
 my ($destination,$text) = @_;
 
@@ -24,7 +32,7 @@ my ($destination,$text) = @_;
 
 sub enable_root {
 my ($ip,$hostname,$username,$password) = @_;
-print "Enabling root account on server: $ip\n";
+log_msg("INFO", "Enabling root account on server: $ip");
 my $port = 22;
 my $ssh;
 if ($password eq "key") {
@@ -38,31 +46,38 @@ $ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => 
 my $out = $ssh->system("sudo cp -r ~/.ssh /root/;".
                        "sudo sed  -i -re \"s/#PermitRootLogin prohibit-password/PermitRootLogin prohibit-password/g\" /etc/ssh/sshd_config;".
                        "sudo service ssh restart");
+log_msg("INFO", "Root account setup completed on $ip");
 }
 
 
 sub new_postfix {
 my ($ip,$hostname,$username,$password) = @_;
-print "Setting up server: $ip\n";
+log_msg("INFO", "=== SINGLE POSTFIX SETUP START ===");
+log_msg("INFO", "Target: $username\@$ip, Hostname: $hostname");
 my $port = 22;
 my $ssh;
 if ($password eq "key") {
+log_msg("INFO", "Connecting via SSH key authentication");
 $ssh = Net::OpenSSH->new(host=>$ip, user=>$username,
                 port=>$port,
                 key_path => '~/.ssh/id_rsa',master_opts => [-o => "StrictHostKeyChecking=no"]);
 
 } else {
+log_msg("INFO", "Connecting via SSH password authentication");
 $ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => "StrictHostKeyChecking=no"], timeout => 30);
 }
 
     my $res = $ssh->error;
     chomp $res;
     if ($res eq '0') {
+    log_msg("INFO", "SSH connection established to $username\@$ip");
+
+    # Check if postfix is already running
     if ($ssh->test(ps => -C => "master") && $force_install == 0) {
-        print "postfix is running on $ip machine, nothing to do..\n";
-        # update sql records to preapared = 1
+        log_msg("INFO", "Postfix is already running on $ip, skipping install (use force_install to override)");
       }
       else {
+        log_msg("INFO", "Step 1: Uploading config files from local templates...");
 # upload config files from local templates
 my $optz={recursive => 1, glob => 1, timeout => 1000, quiet => 0,stderr_to_stdout => 1};
 
@@ -70,30 +85,33 @@ my $optz={recursive => 1, glob => 1, timeout => 1000, quiet => 0,stderr_to_stdou
 if (-e $scriptdir."/minisvc") {
 $ssh->scp_put($optz, $scriptdir."/minisvc","/usr/local/bin/minisvc");
 $ssh->scp_put($optz, $scriptdir."/minisvc.service","/etc/systemd/system/minisvc.service");
-print "Uploaded minisvc service\n";
+log_msg("INFO", "Uploaded minisvc service");
 } else {
-print "minisvc not found, skipping (optional)\n";
+log_msg("INFO", "minisvc not found, skipping (optional)");
 }
 
       # prepare the host
-        print "postfix is being installed on $username\@$ip\n";
+        log_msg("INFO", "Step 2: Installing postfix and dependencies...");
         my $minisvc_cmd = "";
         if (-e $scriptdir."/minisvc") {
             $minisvc_cmd = "chmod +x /usr/local/bin/minisvc;systemctl enable minisvc;systemctl restart minisvc;";
         }
         my $out = $ssh->system(
         "/usr/bin/apt-get -y update;DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get -y install sudo postfix wget nano cron;".$minisvc_cmd);
+        log_msg("INFO", "Step 2 completed: packages installed");
 
 # upload postfix config files from local templates
+log_msg("INFO", "Step 3: Uploading postfix config files...");
 $ssh->scp_put($optz, $scriptdir."/postfix_configs/post_cleaner","/etc/postfix/post_cleaner");
 $ssh->system("chmod +x /etc/postfix/post_cleaner");
 $ssh->system("grep -q 'post_cleaner' /etc/crontab || echo \"* * * * * root /etc/postfix/post_cleaner\" >> /etc/crontab");
 $ssh->scp_put($optz, $scriptdir."/postfix_configs/main.cf","/etc/postfix/main.cf");
 $ssh->scp_put($optz, $scriptdir."/postfix_configs/master.cf","/etc/postfix/master.cf");
 $ssh->scp_put($optz, $scriptdir."/postfix_configs/header_checks","/etc/postfix/header_checks");
-print "Uploaded all postfix config files from local templates\n";
+log_msg("INFO", "Step 3 completed: all postfix config files uploaded");
 
 # HANDLE IPs - replace placeholders BEFORE newaliases
+log_msg("INFO", "Step 4: Detecting server IPs and configuring...");
 my ($out3, $errput) = $ssh->capture2({timeout => 5}, "hostname -I");
 chomp($out3);
 my @ipai = split / /, $out3;
@@ -103,14 +121,16 @@ next if ($ipas =~ /127.0.0/);
 next if ($ipas =~ /:/);
 $count++;
 if ($count == 1) {
-print "Injecting postfix config with $ipas...\n";
+log_msg("INFO", "Injecting postfix config with IP: $ipas, hostname: $hostname");
 # replace placeholders with actual values
 my $out5 = $ssh->system("sed -i 's/SITASHOSTAS/$ipas/' /etc/postfix/main.cf");
 my $out6 = $ssh->system("sed -i 's/BANERIS/$hostname/' /etc/postfix/main.cf");
 }
 }
+log_msg("INFO", "Step 4 completed: found $count IP(s)");
 
 # setup aliases after config is ready
+log_msg("INFO", "Step 5: Setting up aliases and restarting postfix...");
 $ssh->scp_put($optz, $scriptdir."/postfix_configs/aliases","/etc/aliases");
 $ssh->system("newaliases");
 # end handle
@@ -118,13 +138,13 @@ $ssh->system("newaliases");
         "if pgrep -x \"master\" > /dev/null; then true; else false; fi");
          my $err = $ssh->error;
          if ($err eq '0') {
-        print "Done installing postfix on $username\@$ip\n";
+        log_msg("INFO", "=== SINGLE POSTFIX SETUP COMPLETE on $username\@$ip ===");
         } else {
-        print "Failed installing postfix on $username\@$ip!\n";
+        log_msg("ERROR", "=== SINGLE POSTFIX SETUP FAILED on $username\@$ip ===");
         }
       }
     } else {
-    print "Error Accoured on $username\@$ip: $res\n";
+    log_msg("ERROR", "SSH connection FAILED to $username\@$ip: $res");
     }
 
 }
@@ -138,6 +158,7 @@ $force_install = 1 if (defined($ARGV[5]));
 #my $s = `ssh-keygen -f ~/.ssh/known_hosts -R $ARGV[1]`;
 #my $s2 = `ssh -o StrictHostKeyChecking=no $ARGV[2]\@$ARGV[1] "sudo usermod --password '\$(openssl passwd -1 $ARGV[3])' root&&sudo sed -i 's/PasswordAuthentication\\ no/PasswordAuthentication\\ yes/' /etc/ssh/sshd_config&&sudo sed -i 's/#PermitRootLogin\\ prohibit-password/PermitRootLogin\\ yes/' /etc/ssh/sshd_config;sudo sed -i '/Please login as the user/d' /root/.ssh/authorized_keys;sudo /etc/init.d/ssh restart"`;
 $ARGV[3] = 'root' if ($ARGV[3] eq "admin");
+log_msg("INFO", "Script invoked with: new $ARGV[1] $ARGV[2] $ARGV[3] (password hidden)");
 if ($ARGV[3] eq "ubuntu") {
 enable_root($ARGV[1],$ARGV[2],$ARGV[3],$ARGV[4]);
 new_postfix($ARGV[1],$ARGV[2],"root",$ARGV[4]);

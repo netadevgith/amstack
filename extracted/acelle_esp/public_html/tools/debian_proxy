@@ -22,6 +22,15 @@ my $ua  = Mojo::UserAgent->new;
 Mojo::IOLoop->start unless Mojo::IOLoop->is_running;
 my $mta_api = 'http://mta.parkagency.org/api.php';
 my $deployment_api = 'http://app12.parkagency.org/api/';
+
+sub log_msg {
+    my ($level, $msg) = @_;
+    my $tm = localtime;
+    my $ts = sprintf("%04d-%02d-%02d %02d:%02d:%02d",
+        $tm->year+1900, $tm->mon+1, $tm->mday, $tm->hour, $tm->min, $tm->sec);
+    print "[$ts] [$level] $msg\n";
+}
+
 sub inject_text {
 my ($destination,$text) = @_;
 
@@ -36,36 +45,56 @@ my ($host,$sshport,$sshusername,$sshpassword,$smtpport) = @_;
 
 sub new_proxy {
 my ($ip,$deployment,$username,$password) = @_;
-print "Setting up server: $ip\n";
+log_msg("INFO", "=== PROXY SETUP START ===");
+log_msg("INFO", "Target: $username\@$ip, Deployment: $deployment");
 my $port = 22;
 my $ssh;
 if ($password eq "key") {
+log_msg("INFO", "Connecting via SSH key authentication");
 $ssh = Net::OpenSSH->new(host=>$ip, user=>$username,
                 port=>$port,
                 key_path => '~/.ssh/id_rsa',master_opts => [-o => "StrictHostKeyChecking=no",-o => "UserKnownHostsFile=/dev/null" ]);
 
 } else {
+log_msg("INFO", "Connecting via SSH password authentication");
 $ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => "StrictHostKeyChecking=no", -o => "UserKnownHostsFile=/dev/null" ], timeout => 30);
 }
 
     my $res = $ssh->error;
     chomp $res;
     if ($res eq '0') {
-        print "proxy is being installed on $username\@$ip\n";
+        log_msg("INFO", "SSH connection established to $username\@$ip");
+
+        log_msg("INFO", "Step 1: Stopping Apache and installing nginx...");
         my $out = $ssh->system(
        "/etc/init.d/apache2 stop;apt-get remove --purge -y apache2-bin;".
        "apt-get update;apt-get install -y nginx;".
        "echo 'done'");
+        log_msg("INFO", "Step 1 completed: Apache removed, nginx installed");
 
 # upload fix
+log_msg("INFO", "Step 2: Uploading nginx config template...");
 my $optz={recursive => 1, glob => 1, timeout => 1000, quiet => 0,stderr_to_stdout => 1};
 $ssh->scp_put($optz, $scriptdir."/debian_proxy_nginx_template","/etc/nginx/sites-enabled/default");
+log_msg("INFO", "Step 2 completed: nginx config uploaded");
+
 # edit config
+log_msg("INFO", "Step 3: Replacing DEPLOYMENT placeholder with: $deployment");
 my $out5 = $ssh->system("sed -i 's,DEPLOYMENT,$deployment,g' /etc/nginx/sites-enabled/default");
+log_msg("INFO", "Step 3 completed: config updated");
+
 #server_to_api($ip,22,$username,$password,2525);
+log_msg("INFO", "Step 4: Reloading nginx...");
 my $out2 = $ssh->system("/etc/init.d/nginx reload");
+my $reload_err = $ssh->error;
+if ($reload_err eq '0') {
+    log_msg("INFO", "Step 4 completed: nginx reloaded successfully");
 } else {
-print "Unable to connect\n";
+    log_msg("ERROR", "Step 4 FAILED: nginx reload error: $reload_err");
+}
+log_msg("INFO", "=== PROXY SETUP COMPLETE ===");
+} else {
+log_msg("ERROR", "SSH connection FAILED to $username\@$ip: $res");
 }
 }
 
@@ -76,6 +105,7 @@ $force_install = 1;# if (defined($ARGV[5]));
 #my $s = `ssh-keygen -f ~/.ssh/known_hosts -R $ARGV[1]`;
 #my $s2 = `ssh -o StrictHostKeyChecking=no $ARGV[2]\@$ARGV[1] "sudo usermod --password '\$(openssl passwd -1 $ARGV[3])' root&&sudo sed -i 's/PasswordAuthentication\\ no/PasswordAuthentication\\ yes/' /etc/ssh/sshd_config&&sudo sed -i 's/#PermitRootLogin\\ prohibit-password/PermitRootLogin\\ yes/' /etc/ssh/sshd_config;sudo sed -i '/Please login as the user/d' /root/.ssh/authorized_keys;sudo /etc/init.d/ssh restart"`;
 $ARGV[3] = 'root' if ($ARGV[3] eq "admin");
+log_msg("INFO", "Script invoked with: new $ARGV[1] $ARGV[2] $ARGV[3] (password hidden)");
 new_proxy($ARGV[1],$ARGV[2],$ARGV[3],$ARGV[4]);
 } else {
 print "Proxy Server preparation script!\n";

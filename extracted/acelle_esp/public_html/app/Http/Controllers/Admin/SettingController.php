@@ -89,24 +89,31 @@ class SettingController extends Controller
         }
         try {
         if (file_exists($failas)) {
+             MailLog::info("proxies(): reading $failas");
              if ($file = fopen($failas, "r")) {
                 while(!feof($file)) {
                     $line = fgets($file);
-                    if (!empty($line) && $line != "") {
-                      preg_match('/set_real_ip_from (.*);/', $line, $matches);
-                      $proxies[] = $matches[1];
+                    if (!empty($line) && trim($line) != "") {
+                      if (preg_match('/set_real_ip_from (.*);/', $line, $matches)) {
+                          $proxies[] = $matches[1];
+                      } else {
+                          MailLog::info("proxies(): skipping non-matching line: " . trim($line));
+                      }
                     }
                  }
                 fclose($file);
              }
+             MailLog::info("proxies(): loaded " . count($proxies) . " proxy IPs");
+        } else {
+             MailLog::warning("proxies(): $failas does not exist");
         }
         } catch (\Exception $e) {
-            MailLog::error("cannot read real_ip.conf: ".$e);
+            MailLog::error("proxies(): cannot read real_ip.conf: ".$e->getMessage());
         }
         if ($request->isMethod('post')) {
         if ($request->type == "1") {
 // add proxy
-        MailLog::info("Got server: ".$request->serv);
+        MailLog::info("proxies(): === ADD PROXY START === server: ".$request->serv);
         $deployment = \Config::get('app.url');
         $errors = 0;
         $str = '';
@@ -142,28 +149,36 @@ class SettingController extends Controller
                 }
 
          $cmd = '$HOME/public_html/tools/debian_proxy new ' . $server->hostname . ' ' . $deployment . ' ' . $server->username . ' ' . $server->password . ' 1 2>&1';
-         MailLog::info("running cmd: ".$cmd);
+         MailLog::info("proxies(): executing: ".$cmd);
+         $start_time = microtime(true);
          exec($cmd, $retArr, $retVal);
+         $elapsed = round(microtime(true) - $start_time, 2);
+         MailLog::info("proxies(): proxy setup completed in {$elapsed}s, exit code: $retVal");
          if ($retVal == 0) {
+         MailLog::info("proxies(): SUCCESS - adding {$server->hostname} to real_ip.conf");
          // add to real_ip.conf and rehash nginx
          $fp = fopen($failas, 'a');
          fwrite($fp, "set_real_ip_from ".$server->hostname.";\n");
          fclose($fp);
          exec("sudo service nginx reload");
+         MailLog::info("proxies(): nginx reloaded");
          }
-         if ($retVal != 0) $errors = 1;
+         if ($retVal != 0) {
+             MailLog::error("proxies(): FAILED with exit code $retVal");
+             $errors = 1;
+         }
                 foreach ($retArr as $output) {
                     $str .= $output . "\n";
                 }
             }
-         MailLog::info("cmd output: ".$str);
+         MailLog::info("proxies(): === ADD PROXY END === output: ".$str);
             header('Content-Type: application/json');
             $data = json_encode(array('error' => $errors,'respond' => $str));
             return $data;
         }
         if ($request->type == "2" && $request->serv != "") {
 // remove proxy
-           MailLog::info("delete server: ".$request->serv);
+           MailLog::info("proxies(): === REMOVE PROXY === server: ".$request->serv);
            $term = $request->serv;
            $arr = file($failas);
            foreach ($arr as $key=> $line) {
@@ -1479,7 +1494,10 @@ elseif ($request->input('poststop') !== null)
 
 
     public function servers(Request $request) {
-
+        // Initialize MailLog for HTTP context
+        if (!MailLog::$logger) {
+            MailLog::configure(storage_path().'/logs/setup_server.log');
+        }
         $error = 0;
         $error_msg = null;
         $server = (object) array();
@@ -1765,8 +1783,12 @@ elseif ($request->input('poststop') !== null)
 
 
     public function setup_server(Request $request) {
+        // Initialize MailLog for HTTP context (normally only configured for queue workers)
+        if (!MailLog::$logger) {
+            MailLog::configure(storage_path().'/logs/setup_server.log');
+        }
         $server = (object)$request->serv;
-       // MailLog::info('DEBUG: '.print_r($server,true));
+        MailLog::info('setup_server(): === SERVER SETUP START === params: '.print_r($server,true));
         $multi = $server->multi;
         $customer = $request->user()->customer->id;
         $warmup = $request->warmup ?? false;
@@ -1776,14 +1798,21 @@ elseif ($request->input('poststop') !== null)
             if (isset($request->domens)) $domens = $request->domens;
             else
                 $domens = "";
-            MailLog::info("Setup PowerMTA server on $server->hostname is being initialized with domains $domens...");
+            MailLog::info("setup_server(): PowerMTA mode - host: $server->hostname, domains: $domens, os: $server->os");
             if (preg_match('/redhat/', $server->os)) {
-                MailLog::info("CentOS Detected, redirecting to CentOS setup script...");
+                MailLog::info("setup_server(): CentOS detected, running redhat_powermta...");
+                $start_time = microtime(true);
                 exec('$HOME/public_html/tools/redhat_powermta ' . $server->hostname . ' ' . $server->user . ' ' . $server->password . ' 1 2>&1', $retArr, $retVal);
+                $elapsed = round(microtime(true) - $start_time, 2);
+                MailLog::info("setup_server(): redhat_powermta completed in {$elapsed}s, exit: $retVal");
             } elseif (preg_match('/debian/', $server->os)) {
-                MailLog::info("Debian Detected, redirecting to Debian setup script...");
-                MailLog::info('$HOME/public_html/tools/debian_powermta ' . $server->hostname . ' ' . $server->user . ' ' . $server->password . ' ' . $domens . ' 2>&1');
-                exec('$HOME/public_html/tools/debian_powermta ' . $server->hostname . ' ' . $server->user . ' ' . $server->password . ' ' . $domens . ' 2>&1', $retArr, $retVal);
+                MailLog::info("setup_server(): Debian detected, running debian_powermta...");
+                $cmd = '$HOME/public_html/tools/debian_powermta ' . $server->hostname . ' ' . $server->user . ' ' . $server->password . ' ' . $domens . ' 2>&1';
+                MailLog::info("setup_server(): cmd: $cmd");
+                $start_time = microtime(true);
+                exec($cmd, $retArr, $retVal);
+                $elapsed = round(microtime(true) - $start_time, 2);
+                MailLog::info("setup_server(): debian_powermta completed in {$elapsed}s, exit: $retVal");
             } else {
                 $data = (object)array();
                 $data->respond = "Not supported OS";
@@ -1833,13 +1862,21 @@ elseif ($request->input('poststop') !== null)
             return $json;
         } else {
             if ($multi == 0) {
-                MailLog::info("Setup single instance server $server->hostname with dns $server->dns is started...");
+                MailLog::info("setup_server(): Single Postfix mode - host: $server->hostname, dns: $server->dns, os: $server->os");
                 if (preg_match('/redhat/', $server->os)) {
-                    MailLog::info("CentOS Detected, redirecting to CentOS setup script...");
+                    MailLog::info("setup_server(): CentOS detected, running redhat_postfix...");
+                    $start_time = microtime(true);
                     exec('$HOME/public_html/tools/redhat_postfix new ' . $server->hostname . ' ' . $server->dns . ' ' . $server->user . ' ' . $server->password . ' 1 2>&1', $retArr, $retVal);
+                    $elapsed = round(microtime(true) - $start_time, 2);
+                    MailLog::info("setup_server(): redhat_postfix completed in {$elapsed}s, exit: $retVal");
                 } elseif (preg_match('/debian/', $server->os)) {
-                    MailLog::info("Debian Detected, redirecting to Debian setup script...");
-                    exec('$HOME/public_html/tools/debian_postfix new ' . $server->hostname . ' ' . $server->dns . ' ' . $server->user . ' ' . $server->password . ' 1 2>&1', $retArr, $retVal);
+                    MailLog::info("setup_server(): Debian detected, running debian_postfix...");
+                    $cmd = '$HOME/public_html/tools/debian_postfix new ' . $server->hostname . ' ' . $server->dns . ' ' . $server->user . ' ' . $server->password . ' 1 2>&1';
+                    MailLog::info("setup_server(): cmd: $cmd");
+                    $start_time = microtime(true);
+                    exec($cmd, $retArr, $retVal);
+                    $elapsed = round(microtime(true) - $start_time, 2);
+                    MailLog::info("setup_server(): debian_postfix completed in {$elapsed}s, exit: $retVal");
                 } else {
                     $data = (object)array();
                     $data->respond = "Not supported OS";
@@ -1854,11 +1891,11 @@ elseif ($request->input('poststop') !== null)
                 $data->respond = $str;
                 $data->error = 0;
                 $json = @json_encode($data);
-                MailLog::info("Respond from server setup is: " . $json);
+                MailLog::info("setup_server(): === SINGLE POSTFIX SETUP END === response: " . $json);
                 return $json;
             } else {
                 // multiple ips server setup using postfix
-                MailLog::info("warmup have been enabled for this setup");
+                MailLog::info("setup_server(): Multi-Postfix mode starting...");
                 /*$warmobj = new \Acelle\Model\Warmups();
                 $warmobj->uid = uniqid();
                 $warmobj->name = $warmup_name;
@@ -1880,54 +1917,63 @@ elseif ($request->input('poststop') !== null)
                 if (isset($request->domens)) $domens = $request->domens;
                 else
                     $domens = "";
-                MailLog::info("Setup multiple server on $server->hostname is being initialized with domains $domens...");
+                MailLog::info("setup_server(): Multi-Postfix - host: $server->hostname, domains: $domens, os: $server->os, warmup: " . var_export($warmup, true));
+                $retArr = array();
+                $retVal = -1;
                 if (preg_match('/redhat/', $server->os)) {
-                    MailLog::info("CentOS Detected, redirecting to CentOS setup script...");
+                    MailLog::info("setup_server(): CentOS detected, running redhat_multipostfix...");
+                    $start_time = microtime(true);
                     exec('$HOME/public_html/tools/redhat_multipostfix ' . $server->hostname . ' ' . $server->user . ' ' . $server->password . ' 1 2>&1', $retArr, $retVal);
+                    $elapsed = round(microtime(true) - $start_time, 2);
+                    MailLog::info("setup_server(): redhat_multipostfix completed in {$elapsed}s, exit: $retVal, lines: " . count($retArr));
                 } elseif (preg_match('/debian/', $server->os)) {
-                    MailLog::info("Debian Detected, redirecting to Debian setup script...");
-                    MailLog::info('$HOME/public_html/tools/debian_multipostfix ' . $server->hostname . ' ' . $server->user . ' ' . $server->password . ' ' . $domens . ' 2>&1');
-                    exec('$HOME/public_html/tools/debian_multipostfix ' . $server->hostname . ' ' . $server->user . ' ' . $server->password . ' ' . $domens . ' 2>&1', $retArr, $retVal);
+                    MailLog::info("setup_server(): Debian detected, running debian_multipostfix...");
+                    $cmd = '$HOME/public_html/tools/debian_multipostfix ' . $server->hostname . ' ' . $server->user . ' ' . $server->password . ' ' . $domens . ' 2>&1';
+                    MailLog::info("setup_server(): cmd: $cmd");
+                    $start_time = microtime(true);
+                    exec($cmd, $retArr, $retVal);
+                    $elapsed = round(microtime(true) - $start_time, 2);
+                    MailLog::info("setup_server(): debian_multipostfix completed in {$elapsed}s, exit: $retVal, lines: " . count($retArr));
                 } else {
                     $data = (object)array();
                     $data->respond = "Not supported OS";
                     $data->error = 1;
+                    MailLog::info("setup_server(): Unsupported OS: $server->os");
                 }
                 $data = (object)array();
                 $error = 0;
                 $str = '';
                 foreach ($retArr as $output) {
-                    //$output = preg_replace('/\n/','',$output);
                     $str .= $output . "\n";
                 }
+                MailLog::info("setup_server(): Script raw output:\n$str");
                 $data->respond = $str;
 
                 foreach ($retArr as $output) {
                     if (strpos($output, "JSON: ") > -1) {
                         $output = preg_replace('/JSON: /', '', $output);
-                        MailLog::info("Multi postfix script returned: $output");
+                        MailLog::info("setup_server(): Multi postfix script returned JSON: $output");
                         $json = @json_decode($output);
                         if (is_object($json)) {
-                            // got some data
                             $data->reverses = $json;
                             $data->error = 0;
-                            MailLog::info("Got some data from script: " . $output);
-
+                            MailLog::info("setup_server(): Got reverses data from script: " . $output);
                         } else {
                             $error = 1;
+                            MailLog::info("setup_server(): JSON decode FAILED for: $output");
                         }
-
-
-                        MailLog::info("Got output json: " . $output);
                     }
                 }
                 if ($error > 0) {
                     $data->respond = $retArr;
                     $data->error = 1;
+                    MailLog::info("setup_server(): Multi-Postfix FAILED - no valid JSON in output");
                 }
                 // here we should implement warmup
-                //MailLog::info("warmup details: $warmup $warmup_name $warmup_email");
-                if ($warmup == true) {
+                // Fix: JS sends "false" as string, PHP "false" == true is true, use strict filter
+                $warmup = filter_var($warmup, FILTER_VALIDATE_BOOLEAN);
+                MailLog::info("setup_server(): warmup after filter: " . var_export($warmup, true) . ", reverses set: " . (isset($data->reverses) ? "yes" : "no"));
+                if ($warmup === true && isset($data->reverses)) {
                     MailLog::info("warmup have been enabled for this setup");
                     // test phrase
                     $ipasai = array();

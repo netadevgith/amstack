@@ -332,7 +332,7 @@ if ($match != "") {
         $string_limit_min = 200;
         $string_limit_max = 243;
         // mazesnis negu 243 bet didesnis negu 200
-        $data = \Acelle\Model\SendingServer::getAll()->where('id','>','1')->get();
+        $data = \Acelle\Model\SendingServer::getAll()->get();
         $servers_string = "";
         $servers = array();
         foreach ($data as $server) {
@@ -420,6 +420,7 @@ if ($match != "") {
                 // remove point if necessary ?
                 if ((strpos($record, ".") > -1)) $record = explode(".", $record)[0];
                 foreach ($result as $dns) {
+                    if (!is_object($dns) || !isset($dns->zone_id)) continue;
                     if (strpos($dns->name, $record) !== false&&$dns->type == $type) {
                       MailLog::info("Found dns record: ".print_r($dns,true));
                       $this->deleteDNSRecord($dns);
@@ -546,6 +547,7 @@ if ($match != "") {
                
 
                 foreach ($result as $dns) {
+                    if (!is_object($dns) || !isset($dns->zone_id)) continue;
                     if ($dns->name == $domain&&$dns->type == "A") {
                         MailLog::info("Found dns record $dns->name: ".print_r($dns,true));
                         $dns->content = $this->host_ip;

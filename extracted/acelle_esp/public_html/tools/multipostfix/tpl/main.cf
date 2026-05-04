@@ -1,6 +1,6 @@
 data_directory = /var/lib/postfix-{NR}
 queue_directory = /var/spool/postfix-{NR}
-multi_instance_name = {IP}
+multi_instance_name = postfix-{NR}
 inet_protocols = ipv4
 inet_interfaces = {IP}
 myhostname = {DNS}

@@ -4,44 +4,92 @@ use strict;
 use warnings;
 use File::Copy qw(copy);
 use File::Slurp qw(read_file write_file);
-my $post_min = 1;
 use File::Basename;
-my $scriptdir = undef;
-$scriptdir = dirname($0);
+use POSIX qw(strftime);
+
+my $scriptdir = dirname($0);
 my $filename = $scriptdir.'/ip_addr';
+
+sub log_msg {
+    my ($level, $msg) = @_;
+    my $ts = strftime("%Y-%m-%d %H:%M:%S", localtime);
+    print "[$ts] [$level] $msg\n";
+}
+
+# Find the next available postfix instance number
+sub find_next_instance {
+    my $max = 0;
+    my @existing = glob("/etc/postfix-*/main.cf");
+    foreach my $f (@existing) {
+        if ($f =~ /postfix-(\d+)/) {
+            $max = $1 if $1 > $max;
+        }
+    }
+    log_msg("INFO", "Highest existing instance: postfix-$max") if $max > 0;
+    return $max + 1;
+}
+
+my $post_min = find_next_instance();
+log_msg("INFO", "=== MULTI INSTANCE BUILDER START === (starting at postfix-$post_min)");
+
 sub build_postfix {
 my ($ip,$reverse) = @_;
-print "Building postfix configuration files with: ";
-print "IP: $ip ";
-print "rDNS: $reverse\n";
-print "Creating postfix instance\n";
-system("postmulti -i postfix-$post_min -p stop");
-system("postmulti -I postfix-$post_min -e create");
-#print "Creating directory: /etc/postfix-$post_min\n";
-#mkdir "/etc/postfix-$post_min";
-#mkdir "/var/spool/postfix-$post_min";
-print "Copying files...\n";
+log_msg("INFO", "Building postfix instance postfix-$post_min: IP=$ip rDNS=$reverse");
+
+# Check if this instance already exists
+if (-d "/etc/postfix-$post_min") {
+    log_msg("WARN", "Directory /etc/postfix-$post_min already exists, stopping existing instance first");
+}
+
+log_msg("INFO", "Stopping postfix-$post_min (if exists)...");
+system("postmulti -i postfix-$post_min -p stop 2>/dev/null");
+log_msg("INFO", "Creating postfix instance postfix-$post_min...");
+my $create_ret = system("postmulti -I postfix-$post_min -e create 2>&1");
+if ($create_ret != 0 || ! -d "/etc/postfix-$post_min") {
+    log_msg("WARN", "postmulti -e create failed (exit: $create_ret), creating directory manually...");
+    system("mkdir -p /etc/postfix-$post_min");
+    system("mkdir -p /var/spool/postfix-$post_min");
+}
+if (! -d "/etc/postfix-$post_min") {
+    log_msg("ERROR", "Failed to create /etc/postfix-$post_min, skipping this instance");
+    $post_min++;
+    return;
+}
+log_msg("INFO", "Copying config files...");
 copy $scriptdir."/tpl/master.cf","/etc/postfix-$post_min/master.cf";
-#mkdir "/var/spool/postfix-$post_min/etc/";
-system("cp -r /var/spool/postfix/etc /var/spool/postfix-$post_min/");
-system("cp /etc/postfix/dynamicmaps.cf /etc/postfix-$post_min/dynamicmaps.cf");
+system("cp -r /var/spool/postfix/etc /var/spool/postfix-$post_min/ 2>/dev/null");
+system("cp /etc/postfix/dynamicmaps.cf /etc/postfix-$post_min/dynamicmaps.cf 2>/dev/null");
 my $data = read_file $scriptdir."/tpl/main.cf", {binmode => ':utf8'};
 $data =~ s/{NR}/$post_min/g;
 $data =~ s/{IP}/$ip/g;
 $data =~ s/{DNS}/$reverse/g;
 write_file "/etc/postfix-$post_min/main.cf", {binmode => ':utf8'}, $data;
-print "Registering new postfix instance...\n";
+log_msg("INFO", "Enabling and starting postfix-$post_min...");
 system("postmulti -i postfix-$post_min -e enable");
-system("postmulti -i postfix-$post_min -p start");
+my $ret = system("postmulti -i postfix-$post_min -p start");
+if ($ret == 0) {
+    log_msg("INFO", "postfix-$post_min started successfully");
+} else {
+    log_msg("ERROR", "postfix-$post_min FAILED to start (exit: $ret)");
+}
 $post_min++;
 }
+
 sub start_build {
+log_msg("INFO", "Reading IP/DNS mappings from: $filename");
 open(my $fh, '<:encoding(UTF-8)', $filename) or die "Could not open file '$filename' $!";
+    my $line_count = 0;
     while (my $row = <$fh>) {
       chomp $row;
-     my @words = split / /, $row; # SPLIT " - " 
-     build_postfix($words[0],$words[1]); 
+      next if $row eq '';
+      $line_count++;
+     my @words = split / /, $row;
+     if (scalar @words >= 2) {
+         build_postfix($words[0],$words[1]);
+     } else {
+         log_msg("WARN", "Skipping malformed line: $row");
+     }
     }
+    log_msg("INFO", "=== MULTI INSTANCE BUILDER COMPLETE === ($line_count instances processed)");
 }
 start_build();
-

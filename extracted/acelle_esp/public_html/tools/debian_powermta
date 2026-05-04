@@ -20,10 +20,18 @@ $scriptdir = dirname($0);
 my $debug = 1;
 my $force_install = 0;
 
+sub log_msg {
+    my ($level, $msg) = @_;
+    my $tm = localtime;
+    my $ts = sprintf("%04d-%02d-%02d %02d:%02d:%02d",
+        $tm->year+1900, $tm->mon+1, $tm->mday, $tm->hour, $tm->min, $tm->sec);
+    print "[$ts] [$level] $msg\n";
+}
 
 
 sub server_to_api {
 my ($host,$sshport,$sshusername,$sshpassword,$smtpport) = @_;
+log_msg("INFO", "Registering server to MTA API: $host:$smtpport");
 $ua->post($mta_api.'?addserver&post=1' => {Accept => '*/*'} => form => { 'hosttype' => 'pmta', 'host' => $host, 'sshport' => $sshport, 'sshusername' => $sshusername, 'sshpassword' => $sshpassword, 'smtpport' => $smtpport });
 }
 
@@ -36,7 +44,8 @@ $scp->scp_put($opts, $scriptdir.$from, $to);
 sub new_pmta {
 my ($ip,$username,$password,@domains) = @_;
 my $domens = "";
-print "Got server details: $ip $username $password\n" if ($debug > 0);
+log_msg("INFO", "=== POWERMTA SETUP START ===");
+log_msg("INFO", "Target: $username\@$ip");
 my $main_dom = "";
 my $countv = 0;
 foreach my $domain(@domains) {
@@ -44,41 +53,60 @@ $countv++;
 $main_dom = $domain if ($countv == 1);
 $domens = $domens . " $domain";
 }
-print "Got domains for dnses: $domens\n" if ($debug > 0);
+log_msg("INFO", "Domains: $domens (main: $main_dom)");
+
 # actual code begins here
 my $port = 22;
 my $ssh;
 if ($password eq "key") {
+log_msg("INFO", "Connecting via SSH key authentication");
 $ssh = Net::OpenSSH->new(host=>$ip, user=>$username,
                 port=>$port,
                 key_path => '~/.ssh/id_rsa',master_opts => [-o => "StrictHostKeyChecking=no"]);
 
 } else {
+log_msg("INFO", "Connecting via SSH password authentication");
 $ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => "StrictHostKeyChecking=no"], timeout => 30);
 }
 # check if connection was made successfull
     my $res = $ssh->error;
     chomp $res;
     if ($res eq '0') {
-   print "powermta is being installed on $username\@$ip\n";
-#        my $out = $ssh->system(
-#       "apt-get update;debconf-set-selections <<< \"postfix postfix/mailname string localhost\";debconf-set-selections <<< \"postfix postfix/main_mailer_type string 'Internet Site'\";DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get -y install sudo postfix wget nano libmath-round-perl libfile-slurp-perl libmojolicious-perl libjson-xs-perl libmath-round-perl;".
-#       "postmulti -e init;sed -i \"/^inet_interfaces = /s/=.*/=127.0.0.1/\" /etc/postfix/main.cf;/etc/init.d/postfix restart;mkdir -p /root/tpl;wget http://devnull.eofnet.lt/header_checks -O /etc/postfix/header_checks;postmulti -p stop");
-# put all necessary files to the target vps
-# we need to update the system...
+   log_msg("INFO", "SSH connection established to $username\@$ip");
+
+   log_msg("INFO", "Step 1: Installing dependencies and removing postfix...");
 my $out66  = $ssh->system("apt-get update;apt-get -y install libmath-round-perl libfile-slurp-perl libmojolicious-perl libjson-xs-perl libmath-round-perl;apt-get -y remove postfix*");
+   log_msg("INFO", "Step 1 completed");
+
+   log_msg("INFO", "Step 2: Uploading PowerMTA files...");
 put_file($ssh,"/multipmta/dns_change","/root/dns_change");
 put_file($ssh,"/multipmta/multi","/root/multi");
 put_file($ssh,"/multipmta/PowerMTA-5.0r7.tar.gz","/root/pmta.tar.gz");
+   log_msg("INFO", "Step 2 completed: files uploaded");
+
 # chmod +x all uploaded scripts
+   log_msg("INFO", "Step 3: Extracting PowerMTA and configuring...");
 my $out44 = $ssh->system("tar xzvf /root/pmta.tar.gz -C /;rm /root/pmta.tar.gz");
 # cut down the licenses
 put_file($ssh,"/multipmta/blacklist.dat","/etc/pmta/blacklist.dat");
 my $licenses = $ssh->system("sed -i '/serial/d' /etc/pmta/license;sed -i '/license/d' /etc/pmta/license; sed -i '/mac/d' /etc/pmta/license");
 my $out1 = $ssh->system("chmod +x /root/dns_change /root/multi");
-my $out55 = $ssh->system("pmtakeytool newdk edm-mail $main_dom 2048&&mv edm-mail.$main_dom.pem /etc/dkim.key");
-my $last = $ssh->system("/root/dns_change".$domens."&&/root/multi $main_dom&&/etc/init.d/pmta stop&&/etc/init.d/pmta start&&/etc/init.d/pmtahttp stop&&/etc/init.d/pmtahttp start");
+   log_msg("INFO", "Step 3 completed: PowerMTA extracted");
 
+   log_msg("INFO", "Step 4: Generating DKIM key for $main_dom...");
+my $out55 = $ssh->system("pmtakeytool newdk edm-mail $main_dom 2048&&mv edm-mail.$main_dom.pem /etc/dkim.key");
+   log_msg("INFO", "Step 4 completed: DKIM key generated");
+
+   log_msg("INFO", "Step 5: Setting up DNS and starting PowerMTA...");
+my $last = $ssh->system("/root/dns_change".$domens."&&/root/multi $main_dom&&/etc/init.d/pmta stop&&/etc/init.d/pmta start&&/etc/init.d/pmtahttp stop&&/etc/init.d/pmtahttp start");
+my $pmta_err = $ssh->error;
+if ($pmta_err eq '0') {
+    log_msg("INFO", "Step 5 completed: PowerMTA started");
+} else {
+    log_msg("ERROR", "Step 5 FAILED: PowerMTA start error: $pmta_err");
+}
+
+log_msg("INFO", "Step 6: Reading IP/DNS mappings...");
 my ($out3, $errput) = $ssh->capture2({timeout => 1}, "cat /root/ip_addr");
 chomp($out3);
 my @dnses = split /\n/, $out3;
@@ -88,16 +116,17 @@ foreach my $ipas (@dnses) {
 next if ($ipas =~ /127.0.0/);
 my @parts = split / /, $ipas;
 $count++;
-print "Got DNS set: $ipas\n";
+log_msg("INFO", "IP/DNS mapping: $ipas");
 push @{$result{$parts[0]}}, $parts[1];
 }
 server_to_api($ip,22,$username,$password,2525);
 # we need to capture the ip/dns configuration and return it to frontend by json, then frontend can parse it and add servers to it's system
 my $json = encode_json(\%result);
+log_msg("INFO", "=== POWERMTA SETUP COMPLETE === ($count IP/DNS mappings)");
 print "JSON: $json\n";
 exit(0);
 } else {
-    print "Unable to connect to $username\@$ip: $res\n";
+    log_msg("ERROR", "SSH connection FAILED to $username\@$ip: $res");
   }
 
 
@@ -115,6 +144,7 @@ if (defined($ARGV[$i])) {
 push(@domains,$ARGV[$i]);
 }
 }
+log_msg("INFO", "Script invoked with: $ARGV[0] $ARGV[1] (password hidden) domains: " . join(" ", @domains));
 new_pmta($ARGV[0],$ARGV[1],$ARGV[2],@domains);
 } else {
 print "PowerMTA Server preparation script!\n";

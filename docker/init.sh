@@ -101,11 +101,25 @@ chown -R www-data:www-data /home/app/public_html/public/source
 
 # Fix www-data SSH access (needed by debian_proxy for proxy setup via UI)
 mkdir -p /var/www/.ssh
-chown www-data:www-data /var/www /var/www/.ssh
+# Copy root SSH keys to www-data so PHP-FPM (running as www-data) can SSH to proxy servers
+if [ -f /root/.ssh/id_rsa ]; then
+    cp /root/.ssh/id_rsa /var/www/.ssh/id_rsa
+    cp /root/.ssh/id_rsa.pub /var/www/.ssh/id_rsa.pub 2>/dev/null || true
+    cp /root/.ssh/known_hosts /var/www/.ssh/known_hosts 2>/dev/null || true
+fi
+chown -R www-data:www-data /var/www /var/www/.ssh
 chmod 700 /var/www/.ssh
+chmod 600 /var/www/.ssh/id_rsa 2>/dev/null || true
 
-# Fix nginx real_ip.conf permissions (SettingController writes proxy IPs here)
-touch /etc/nginx/real_ip.conf
+# Fix nginx real_ip.conf - pre-populate with Docker gateway IPs so nginx trusts
+# X-Real-IP / X-Forwarded-For headers from the host reverse proxy.
+# SettingController may append additional proxy IPs at runtime.
+cat > /etc/nginx/real_ip.conf << 'REALIP'
+set_real_ip_from 172.28.0.0/16;
+set_real_ip_from 172.29.0.0/16;
+set_real_ip_from 127.0.0.1;
+set_real_ip_from 10.0.0.0/8;
+REALIP
 chmod 666 /etc/nginx/real_ip.conf
 
 # Symlink tools dir for www-data ($HOME=/var/www for php-fpm)
@@ -274,7 +288,8 @@ fi
 
 # ---- Setup cron jobs ----
 echo "[9/9] Setting up cron jobs..."
-cat > /etc/cron.d/esp-crons << 'CRONEOF'
+if [ "${ESP_WORKER}" != "false" ]; then
+    cat > /etc/cron.d/esp-crons << 'CRONEOF'
 # Taskrunner check every minute
 * * * * * root /home/app/taskrunner/cron_check >> /home/app/taskrunner/taskrunner.log 2>&1
 
@@ -282,7 +297,12 @@ cat > /etc/cron.d/esp-crons << 'CRONEOF'
 # Do NOT add them here — they are long-running daemons, not cron tasks.
 # Adding queue:work to cron spawns a new daemon every minute, causing OOM kill.
 CRONEOF
-chmod 644 /etc/cron.d/esp-crons
+    chmod 644 /etc/cron.d/esp-crons
+else
+    # Non-worker instance: disable taskrunner cron
+    echo "# Taskrunner disabled - runs only on primary worker instance" > /etc/cron.d/esp-crons
+    chmod 644 /etc/cron.d/esp-crons
+fi
 service cron start 2>/dev/null || true
 echo "  Cron jobs configured."
 
@@ -307,17 +327,20 @@ echo "  Postfix started (ports 25, 2525)."
 
 # Redis proxy already started earlier (after Redis readiness check)
 
-# ---- Start storage service in background ----
-if [ -f /opt/storage/storage ]; then
-    echo "  Starting storage service..."
-    /opt/storage/storage --daemonize &
-fi
+# ---- Start background services (worker instances only) ----
+if [ "${ESP_WORKER}" != "false" ]; then
+    if [ -f /opt/storage/storage ]; then
+        echo "  Starting storage service..."
+        /opt/storage/storage --daemonize &
+    fi
 
-# ---- Start taskrunner in background ----
-if [ -f /home/app/taskrunner/taskrunner ]; then
-    echo "  Starting taskrunner..."
-    cd /home/app/taskrunner
-    ./taskrunner >> /home/app/taskrunner/taskrunner.log 2>&1 &
+    if [ -f /home/app/taskrunner/taskrunner ]; then
+        echo "  Starting taskrunner..."
+        cd /home/app/taskrunner
+        ./taskrunner >> /home/app/taskrunner/taskrunner.log 2>&1 &
+    fi
+else
+    echo "  Skipping background services (ESP_WORKER=false)"
 fi
 
 # ---- Restart any campaigns that were sending before container restart ----
@@ -363,6 +386,28 @@ echo "============================================"
 # Create required dirs for PHP-FPM
 mkdir -p /var/run/php
 mkdir -p /var/log/supervisor
+
+# Fix PHP-FPM: disable clear_env so workers inherit environment variables
+# (needed for CLOUDFLARE_EMAIL, CLOUDFLARE_APIKEY, HOME used by Perl tools)
+PHP_FPM_CONF="/etc/php/7.2/fpm/pool.d/www.conf"
+if [ -f "$PHP_FPM_CONF" ]; then
+    if grep -q "^clear_env" "$PHP_FPM_CONF"; then
+        sed -i 's/^clear_env.*/clear_env = no/' "$PHP_FPM_CONF"
+    elif grep -q "^;clear_env" "$PHP_FPM_CONF"; then
+        sed -i 's/^;clear_env.*/clear_env = no/' "$PHP_FPM_CONF"
+    else
+        echo "clear_env = no" >> "$PHP_FPM_CONF"
+    fi
+fi
+
+# Increase nginx fastcgi_read_timeout for long-running scripts (multipostfix setup etc.)
+NGINX_CONF="/etc/nginx/sites-enabled/default"
+if [ -f "$NGINX_CONF" ]; then
+    sed -i 's/fastcgi_read_timeout [0-9]*/fastcgi_read_timeout 600/' "$NGINX_CONF"
+fi
+
+# Final permission fix (catches files created by init PHP commands)
+chown -R www-data:www-data /home/app/public_html/storage 2>/dev/null || true
 
 # Start supervisor (nginx + php-fpm + queue workers)
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf

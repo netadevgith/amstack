@@ -141,7 +141,7 @@ class Campaign extends AbsCampaign
                     ->join('campaigns_lists_segments', 'campaigns.id', '=', 'campaigns_lists_segments.campaign_id')
                     ->join('mail_lists', 'campaigns_lists_segments.mail_list_id', '=', 'mail_lists.id')->where('mail_lists.id', $this->defaultMailList->id)->first()->all_sending_servers == 1) {
                 $servers = \DB::table('sending_servers')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port','smtp_protocol','smtp_username','smtp_password','threads')
-                    ->where('status', 'active')->where('sending_servers.id', '>', 1)->get();
+                    ->where('status', 'active')->get();
                 MailLog::info("all servers assigend for campaign $this->uid");
 
 
@@ -451,7 +451,7 @@ class Campaign extends AbsCampaign
                     ->join('campaigns_lists_segments', 'campaigns.id', '=', 'campaigns_lists_segments.campaign_id')
                     ->join('mail_lists', 'campaigns_lists_segments.mail_list_id', '=', 'mail_lists.id')->where('mail_lists.id', $this->defaultMailList->id)->first()->all_sending_servers == 1) {
                 $servers = \DB::table('sending_servers')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port','smtp_protocol','smtp_username','smtp_password','threads')
-                    ->where('status', 'active')->where('sending_servers.id', '>', 1)->get();
+                    ->where('status', 'active')->get();
             } else {
                 $servers = \DB::table('campaigns')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port', 'fitness','smtp_protocol','smtp_username','smtp_password','threads')
                     ->join('campaigns_lists_segments', 'campaigns.id', '=', 'campaigns_lists_segments.campaign_id')
@@ -468,8 +468,9 @@ class Campaign extends AbsCampaign
                 if (!isset($serv->fitness)) $serv->fitness = $default_speed;
                 switch ($serv->type) {
                     case "smtp":
-                        MailLog::info("./gosender --send --campuid $this->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness --username $serv->smtp_username --password $serv->smtp_password $ssl --app $deployment $nodone");
-                        exec("\$HOME/gosender --send --campuid $this->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness --username $serv->smtp_username --password $serv->smtp_password $ssl --app $deployment $nodone > /dev/null 2>&1 &");
+                        $auth_flags = (!empty($serv->smtp_username)) ? "--username $serv->smtp_username --password $serv->smtp_password" : "";
+                        MailLog::info("./gosender --send --campuid $this->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness $auth_flags $ssl --app $deployment $nodone");
+                        exec("\$HOME/gosender --send --campuid $this->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness $auth_flags $ssl --app $deployment $nodone > /dev/null 2>&1 &");
                         break;
                     case "amazon-api":
                         if ($serv->threads > 1) {
@@ -699,7 +700,7 @@ try {
                     $campobj->save();
                     if ($campobj->defaultMailList->all_sending_servers == 1) {
                         MailLog::info("DEFERRED: BACKGROUND RETRY SENDING PROCESSES - All sending servers are enabled for campaign $uid");
-                        $servers = \DB::table('sending_servers')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port','smtp_protocol','smtp_username','smtp_password','threads')->where('status', 'active')->where('sending_servers.id', '>', 1)->get();
+                        $servers = \DB::table('sending_servers')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port','smtp_protocol','smtp_username','smtp_password','threads')->where('status', 'active')->get();
                     } else {
                         MailLog::info("DEFERRED: BACKGROUND RETRY SENDING PROCESSES - Only specified servers are enabled for campaign $uid");
                         $servers = \DB::table('campaigns')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port', 'fitness','smtp_protocol','smtp_username','smtp_password','threads')
@@ -718,8 +719,9 @@ try {
                         if ($serv->smtp_protocol != "") $ssl = "--ssl";
                         switch ($serv->type) {
                             case "smtp":
-                                MailLog::info("./gosender --send --campuid $campobj->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness --username $serv->smtp_username --password $serv->smtp_password $ssl --app $deployment --nodone");
-                                exec("\$HOME/gosender --send --campuid $campobj->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness --username $serv->smtp_username --password $serv->smtp_password $ssl --app $deployment --nodone > /dev/null 2>&1 &");
+                                $auth_flags = (!empty($serv->smtp_username)) ? "--username $serv->smtp_username --password $serv->smtp_password" : "";
+                                MailLog::info("./gosender --send --campuid $campobj->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness $auth_flags $ssl --app $deployment --nodone");
+                                exec("\$HOME/gosender --send --campuid $campobj->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness $auth_flags $ssl --app $deployment --nodone > /dev/null 2>&1 &");
                                 break;
                             case "amazon-api":
                                 if ($serv->threads > 1) {
@@ -777,7 +779,7 @@ try {
                // $campobj->save();
                     if ($campobj->defaultMailList->all_sending_servers == 1) {
                         MailLog::info("BACKGROUND RETRY SENDING PROCESSES - All sending servers are enabled for campaign $camp");
-                        $servers = \DB::table('sending_servers')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port','smtp_protocol','smtp_username','smtp_password','threads')->where('status', 'active')->where('sending_servers.id', '>', 1)->get();
+                        $servers = \DB::table('sending_servers')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port','smtp_protocol','smtp_username','smtp_password','threads')->where('status', 'active')->get();
                     } else {
                         MailLog::info("BACKGROUND RETRY SENDING PROCESSES - Only specified servers are enabled for campaign $camp");
                         $servers = \DB::table('campaigns')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port', 'fitness','smtp_protocol','smtp_username','smtp_password','threads')
@@ -861,8 +863,9 @@ if ($resend_count > 0) {
             if ($serv->smtp_protocol != "") $ssl = "--ssl";
             switch ($serv->type) {
                 case "smtp":
-                    MailLog::info("./gosender --send --campuid $campobj->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness --username $serv->smtp_username --password $serv->smtp_password $ssl --app $deployment --nodone");
-                    exec("\$HOME/gosender --send --campuid $campobj->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness --username $serv->smtp_username --password $serv->smtp_password $ssl --app $deployment --nodone > /dev/null 2>&1 &");
+                    $auth_flags = (!empty($serv->smtp_username)) ? "--username $serv->smtp_username --password $serv->smtp_password" : "";
+                    MailLog::info("./gosender --send --campuid $campobj->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness $auth_flags $ssl --app $deployment --nodone");
+                    exec("\$HOME/gosender --send --campuid $campobj->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness $auth_flags $ssl --app $deployment --nodone > /dev/null 2>&1 &");
                     break;
                 case "amazon-api":
                     if ($serv->threads > 1) {
@@ -946,7 +949,7 @@ if ($resend_count > 0) {
                     // we should get the type of sending process are used in the campaign by quering its maillist, then use smtp or ses based sending
                     if ($campobj->defaultMailList->all_sending_servers == 1) {
                         MailLog::info("BACKGROUND SENDING PROCESSES RESTART - All sending servers are enabled for campaign $camp");
-                        $servers = \DB::table('sending_servers')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port', 'smtp_protocol','smtp_username','smtp_password','threads')->where('status', 'active')->where('sending_servers.id', '>', 1)->get();
+                        $servers = \DB::table('sending_servers')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port', 'smtp_protocol','smtp_username','smtp_password','threads')->where('status', 'active')->get();
                     } else {
                         MailLog::info("BACKGROUND SENDING PROCESSES RESTART - Only specified servers are enabled for campaign $camp");
                         $servers = \DB::table('campaigns')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port', 'fitness','smtp_protocol','smtp_username','smtp_password','threads')
@@ -963,8 +966,9 @@ if ($resend_count > 0) {
                         if ($campobj->defaultMailList->all_sending_servers == 1) $servas->fitness = $campobj->defaultMailList->speed;
                         switch ($servas->type) {
                             case "smtp":
-                                MailLog::info("\$HOME/gosender --send --campuid $campobj->uid --smtphost $servas->host --smtpport $servas->smtp_port --smtpspeed $servas->fitness --username $servas->smtp_username --password $servas->smtp_password $ssl --app $deployment --nodone > /dev/null 2>&1 &");
-                                exec("\$HOME/gosender --send --campuid $campobj->uid --smtphost $servas->host --smtpport $servas->smtp_port --smtpspeed $servas->fitness --username $servas->smtp_username --password $servas->smtp_password $ssl --app $deployment --nodone > /dev/null 2>&1 &");
+                                $auth_flags = (!empty($servas->smtp_username)) ? "--username $servas->smtp_username --password $servas->smtp_password" : "";
+                                MailLog::info("\$HOME/gosender --send --campuid $campobj->uid --smtphost $servas->host --smtpport $servas->smtp_port --smtpspeed $servas->fitness $auth_flags $ssl --app $deployment --nodone > /dev/null 2>&1 &");
+                                exec("\$HOME/gosender --send --campuid $campobj->uid --smtphost $servas->host --smtpport $servas->smtp_port --smtpspeed $servas->fitness $auth_flags $ssl --app $deployment --nodone > /dev/null 2>&1 &");
                                 break;
                             case "amazon-api":
                                 if ($servas->threads > 1) {

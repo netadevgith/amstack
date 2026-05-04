@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"log"
 	"net/mail"
 	"strings"
@@ -26,6 +27,7 @@ func encodeRFC2047(String string) string {
 }
 
 func SMTPSend(req SMTPRequest) {
+	log.Printf("SMTPSend: to=%s, subject=%s, body_len=%d, body_preview=%.200s", req.ToEmail, req.Subject, len(req.Body), req.Body)
 	static_port := req.Port
 	m := gomail.NewMessage(gomail.SetEncoding(gomail.Base64))
 	m.SetBody("text/html", req.Body)
@@ -38,6 +40,7 @@ func SMTPSend(req SMTPRequest) {
 	}
 	// Send the email.
 	d := gomail.NewPlainDialer(req.ServerIP, static_port, "", "")
+	d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 	// Display an error message if something goes wrong
 	if err := d.DialAndSend(m); err != nil {
 		log.Printf("Error on sendout: %s!\n", err)

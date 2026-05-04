@@ -12,6 +12,7 @@ use Time::localtime;
 use Mojo::UserAgent;
 use File::Basename;
 use File::Slurp;
+use File::Temp qw(tempdir);
 my $scriptdir = undef;
 $scriptdir = dirname($0);
 my $debug = 1;
@@ -24,6 +25,14 @@ my $cf_email = $ENV{CLOUDFLARE_EMAIL} // '';
 my $cf_apikey = $ENV{CLOUDFLARE_APIKEY} // '';
 my $cf_api = 'https://api.cloudflare.com/client/v4';
 
+sub log_msg {
+    my ($level, $msg) = @_;
+    my $tm = localtime;
+    my $ts = sprintf("%04d-%02d-%02d %02d:%02d:%02d",
+        $tm->year+1900, $tm->mon+1, $tm->mday, $tm->hour, $tm->min, $tm->sec);
+    print "[$ts] [$level] $msg\n";
+}
+
 sub cf_headers {
     return {
         'X-Auth-Email' => $cf_email,
@@ -34,31 +43,33 @@ sub cf_headers {
 
 sub cf_get_zone_id {
     my ($domain) = @_;
+    log_msg("DEBUG", "Looking up Cloudflare zone_id for domain: $domain");
     my $tx = $ua->get($cf_api."/zones?name=$domain" => cf_headers());
     if ($tx->result->is_success) {
         my $json = $tx->result->json;
         if ($json->{success} && scalar(@{$json->{result}}) > 0) {
             my $zone_id = $json->{result}[0]{id};
-            print "Found zone_id for $domain: $zone_id\n" if ($debug > 0);
+            log_msg("INFO", "Found zone_id for $domain: $zone_id");
             return $zone_id;
         }
     }
-    print "ERROR: Could not find zone_id for domain $domain\n";
+    log_msg("ERROR", "Could not find zone_id for domain $domain");
     return undef;
 }
 
 sub cf_create_dns {
     my ($zone_id, $subdomain, $ip) = @_;
+    log_msg("INFO", "Creating DNS record: $subdomain -> $ip (zone: $zone_id)");
     my $data = encode_json({type => 'A', name => $subdomain, content => $ip, proxied => JSON::XS::false});
     my $tx = $ua->post($cf_api."/zones/$zone_id/dns_records" => cf_headers() => $data);
     if ($tx->result->is_success) {
         my $json = $tx->result->json;
         if ($json->{success}) {
-            print "Created DNS: $subdomain -> $ip\n" if ($debug > 0);
+            log_msg("INFO", "DNS record created successfully: $subdomain -> $ip");
             return 1;
         }
     }
-    print "ERROR: Failed to create DNS record $subdomain -> $ip\n";
+    log_msg("ERROR", "Failed to create DNS record $subdomain -> $ip");
     return 0;
 }
 
@@ -80,56 +91,117 @@ sub put_file {
 sub new_postfix {
 my ($ip,$username,$password,@domains) = @_;
 my $domens = "";
-print "Got server details: $ip $username $password\n" if ($debug > 0);
+log_msg("INFO", "=== MULTI-POSTFIX SETUP START ===");
+log_msg("INFO", "Target: $username\@$ip");
 foreach my $domain(@domains) {
 $domens = $domens . " $domain";
 }
-print "Got domains for dnses: $domens\n" if ($debug > 0);
+log_msg("INFO", "Domains for DNS: $domens");
+
 # actual code begins here
 my $port = 22;
 my $ssh;
+# Use unique ctl_dir per process to avoid socket conflicts between concurrent runs
+my $ctl_dir = tempdir(CLEANUP => 1);
+log_msg("DEBUG", "SSH control socket dir: $ctl_dir");
+
 if ($password eq "key") {
+log_msg("INFO", "Connecting via SSH key authentication");
 $ssh = Net::OpenSSH->new(host=>$ip, user=>$username,
                 port=>$port,
-                key_path => '~/.ssh/id_rsa',master_opts => [-o => "StrictHostKeyChecking=no"]);
+                key_path => '~/.ssh/id_rsa',
+                ctl_dir => $ctl_dir,
+                master_opts => [-o => "StrictHostKeyChecking=no"]);
 
 } else {
-$ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",master_opts => [-o => "StrictHostKeyChecking=no"], timeout => 30);
+log_msg("INFO", "Connecting via SSH password authentication");
+$ssh = Net::OpenSSH->new("$username:$password\@$ip:$port",
+                ctl_dir => $ctl_dir,
+                master_opts => [-o => "StrictHostKeyChecking=no"],
+                timeout => 30);
 }
 # check if connection was made successfull
     my $res = $ssh->error;
     chomp $res;
     if ($res eq '0') {
-  print "postfix is being installed on $username\@$ip\n";
+  log_msg("INFO", "SSH connection established to $username\@$ip");
+
+  # Safety check: detect existing postfix instances before proceeding
+  log_msg("INFO", "Safety check: detecting existing postfix instances...");
+  my ($existing_instances, $ei_err) = $ssh->capture2({timeout => 30}, "postmulti -l 2>/dev/null || echo 'no-postmulti'");
+  if ($ssh->error) {
+      log_msg("WARN", "capture2 failed for postmulti check: " . $ssh->error . ", continuing...");
+      $existing_instances = '';
+  }
+  chomp($existing_instances);
+  if ($existing_instances ne 'no-postmulti' && $existing_instances =~ /postfix-/) {
+      log_msg("WARN", "EXISTING postfix instances detected on this server:");
+      foreach my $line (split /\n/, $existing_instances) {
+          log_msg("WARN", "  $line");
+      }
+      log_msg("WARN", "These instances will be affected by the setup process!");
+  }
+
+  # Check if postfix master process is currently running
+  my ($ps_check, $ps_err) = $ssh->capture2({timeout => 30}, "pgrep -a master 2>/dev/null || echo 'none'");
+  if ($ssh->error) {
+      log_msg("WARN", "capture2 failed for pgrep check: " . $ssh->error);
+      $ps_check = 'unknown';
+  }
+  chomp($ps_check);
+  log_msg("INFO", "Current postfix master processes: $ps_check");
+
+  log_msg("INFO", "Step 1: Installing packages and initializing postmulti...");
         my $out = $ssh->system(
        "apt-get update;debconf-set-selections <<< \"postfix postfix/mailname string localhost\";debconf-set-selections <<< \"postfix postfix/main_mailer_type string 'Internet Site'\";DEBIAN_FRONTEND=noninteractive /usr/bin/apt-get -y install sudo postfix wget nano libfile-slurp-perl;".
-       "postmulti -e init;sed -i \"/^inet_interfaces = /s/=.*/=127.0.0.1/\" /etc/postfix/main.cf;/etc/init.d/postfix restart;mkdir -p /root/tpl;postmulti -p stop");
+       "postmulti -e init;sed -i \"/^inet_interfaces = /s/=.*/=127.0.0.1/\" /etc/postfix/main.cf;/etc/init.d/postfix restart;mkdir -p /root/tpl");
+  log_msg("INFO", "Step 1 completed: packages installed, postmulti initialized, default instance restricted to 127.0.0.1");
+  log_msg("INFO", "NOTE: existing postfix instances are NOT stopped (safety improvement)");
 
 # upload header_checks from local template
+log_msg("INFO", "Step 2: Uploading config templates...");
 put_file($ssh,"/postfix_configs/header_checks","/etc/postfix/header_checks");
 
 # put multi script and templates to the target vps
 put_file($ssh,"/multipostfix/multi","/root/multi");
 put_file($ssh,"/multipostfix/tpl/main.cf","/root/tpl/main.cf");
 put_file($ssh,"/multipostfix/tpl/master.cf","/root/tpl/master.cf");
+log_msg("INFO", "Step 2 completed: config templates uploaded");
 
 # upload minisvc if available (optional monitoring service)
 if (-e $scriptdir."/minisvc") {
 put_file($ssh,"/minisvc","/usr/local/bin/minisvc");
 put_file($ssh,"/minisvc.service","/etc/systemd/system/minisvc.service");
 $ssh->system("chmod +x /usr/local/bin/minisvc;systemctl enable minisvc;systemctl restart minisvc");
-print "Uploaded minisvc service\n";
+log_msg("INFO", "Uploaded and started minisvc service");
 } else {
-print "minisvc not found, skipping (optional)\n";
+log_msg("INFO", "minisvc not found, skipping (optional)");
 }
 
 # chmod +x uploaded scripts
 my $out1 = $ssh->system("chmod +x /root/multi");
 
 # === DNS SETUP via Cloudflare API (replaces dns_change) ===
-# 1. Get all IPs from remote server
-my ($out3, $errput) = $ssh->capture2({timeout => 5}, "hostname -I");
+log_msg("INFO", "Step 3: Setting up DNS records via Cloudflare API...");
+# 1. Get all IPs from remote server (with retry)
+my ($out3, $errput) = $ssh->capture2({timeout => 30}, "hostname -I");
+if ($ssh->error || !defined($out3) || $out3 eq '') {
+    log_msg("WARN", "First capture2 for hostname -I failed: " . ($ssh->error || 'empty output') . ", retrying...");
+    sleep(2);
+    ($out3, $errput) = $ssh->capture2({timeout => 30}, "hostname -I");
+    if ($ssh->error || !defined($out3) || $out3 eq '') {
+        log_msg("ERROR", "hostname -I failed after retry: " . ($ssh->error || 'empty output'));
+        # Fallback: try via system() + cat
+        $ssh->system("hostname -I > /tmp/_ips.txt");
+        ($out3, $errput) = $ssh->capture2({timeout => 30}, "cat /tmp/_ips.txt");
+        if (!defined($out3) || $out3 eq '') {
+            log_msg("ERROR", "Cannot get IPs from server. Aborting.");
+            exit(1);
+        }
+    }
+}
 chomp($out3);
+log_msg("DEBUG", "Raw hostname -I output: '$out3'");
 my @all_ips;
 foreach my $raw_ip (split /\s+/, $out3) {
     next if ($raw_ip =~ /127\.0\.0/);
@@ -138,7 +210,7 @@ foreach my $raw_ip (split /\s+/, $out3) {
     push @all_ips, $raw_ip;
 }
 my $ipcount = scalar @all_ips;
-print "Detected $ipcount IP addresses on remote server\n";
+log_msg("INFO", "Detected $ipcount IP addresses on remote server: " . join(", ", @all_ips));
 
 # 2. Resolve zone_ids for each domain
 my @zone_ids;
@@ -147,14 +219,15 @@ foreach my $domain (@domains) {
     if (defined $zid) {
         push @zone_ids, {domain => $domain, zone_id => $zid};
     } else {
-        print "WARNING: Skipping domain $domain - zone not found in Cloudflare\n";
+        log_msg("WARN", "Skipping domain $domain - zone not found in Cloudflare");
     }
 }
 
 if (scalar @zone_ids == 0) {
-    print "ERROR: No valid Cloudflare zones found for any domain. Aborting DNS setup.\n";
+    log_msg("ERROR", "No valid Cloudflare zones found for any domain. Aborting DNS setup.");
     exit(1);
 }
+log_msg("INFO", "Found " . scalar(@zone_ids) . " valid Cloudflare zone(s)");
 
 # 3. For each IP, create a random subdomain DNS record
 my $ips_per_domain = int(($ipcount + scalar @zone_ids - 1) / scalar @zone_ids);
@@ -175,21 +248,39 @@ foreach my $server_ip (@all_ips) {
 
     if (cf_create_dns($zone->{zone_id}, $random_name, $server_ip)) {
         $ip_addr_content .= "$server_ip $subdomain\n";
-        print "DNS created: $server_ip -> $subdomain\n";
+        log_msg("INFO", "DNS created: $server_ip -> $subdomain");
     } else {
-        print "WARNING: Failed to create DNS for $server_ip, skipping\n";
+        log_msg("WARN", "Failed to create DNS for $server_ip, skipping");
     }
     $domain_counter++;
 }
+log_msg("INFO", "Step 3 completed: DNS records created");
 
 # 4. Write ip_addr file to remote server
+log_msg("INFO", "Step 4: Writing ip_addr file and creating postfix instances...");
 $ssh->system("cat > /root/ip_addr << 'IPEOF'\n${ip_addr_content}IPEOF");
 
 # 5. Run multi script to create postfix instances
-my $last = $ssh->system("/root/multi&&postmulti -p start");
+log_msg("INFO", "Running /root/multi to create postfix instances (each instance is started individually)...");
+my $last = $ssh->system("/root/multi");
+my $multi_err = $ssh->error;
+if ($multi_err eq '0') {
+    log_msg("INFO", "Step 4 completed: postfix instances created and started individually");
+} else {
+    log_msg("ERROR", "Step 4 FAILED: multi script error: $multi_err");
+}
+
+# Verify postfix is running
+my ($verify_ps, $verify_err) = $ssh->capture2({timeout => 30}, "pgrep -a master 2>/dev/null || echo 'NO MASTER PROCESS'");
+if ($ssh->error) {
+    log_msg("WARN", "capture2 failed for post-setup verify: " . $ssh->error);
+    $verify_ps = 'unknown';
+}
+chomp($verify_ps);
+log_msg("INFO", "Post-setup verification - master processes: $verify_ps");
 
 # 6. Read back ip_addr for result
-my ($out_ips, $err_ips) = $ssh->capture2({timeout => 5}, "cat /root/ip_addr");
+my ($out_ips, $err_ips) = $ssh->capture2({timeout => 30}, "cat /root/ip_addr");
 chomp($out_ips);
 my @dnses = split /\n/, $out_ips;
 my $count = 0;
@@ -200,15 +291,16 @@ next if ($ipas =~ /:/);
 my @parts = split / /, $ipas;
 next if (scalar @parts < 2);
 $count++;
-print "Got DNS set: $ipas\n";
+log_msg("INFO", "IP/DNS mapping: $ipas");
 push @{$result{$parts[0]}}, $parts[1];
 }
 # we need to capture the ip/dns configuration and return it to frontend by json, then frontend can parse it and add servers to it's system
 my $json = encode_json(\%result);
+log_msg("INFO", "=== MULTI-POSTFIX SETUP COMPLETE === ($count IP/DNS mappings)");
 print "JSON: $json\n";
 exit(0);
 } else {
-    print "Unable to connect to $username\@$ip: $res\n";
+    log_msg("ERROR", "SSH connection FAILED to $username\@$ip: $res");
   }
 
 
@@ -223,9 +315,16 @@ $ARGV[1] = 'root' if ($ARGV[1] eq "admin");
 my @domains;
 for ( my $i = 3 ; $i <= $#ARGV ; $i++ ) {
 if (defined($ARGV[$i])) {
-push(@domains,$ARGV[$i]);
+my $d = $ARGV[$i];
+# Strip URL prefixes and trailing slashes (user may paste URLs like http://trak1.nl/)
+$d =~ s{^https?://}{}i;
+$d =~ s{/+$}{};
+$d =~ s{^\s+|\s+$}{}g;
+next if $d eq '';
+push(@domains,$d);
 }
 }
+log_msg("INFO", "Script invoked with: $ARGV[0] $ARGV[1] (password hidden) domains: " . join(" ", @domains));
 new_postfix($ARGV[0],$ARGV[1],$ARGV[2],@domains);
 } else {
 print "Multi Postfix Server preparation script!\n";

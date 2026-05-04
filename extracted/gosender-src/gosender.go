@@ -318,7 +318,7 @@ func MainLoop(camp Campaign) {
 						camp2 = tmpcamp2
 					}
 					trackdomain2 := DetectTrackingDomain(camp2, defsub)
-					parsed_html2 := GenerateCampaignTemplate(campaign, camp2.Html, defsub, trackdomain2, camp2.Tracktype)
+					parsed_html2 := GenerateCampaignTemplate(campaign, GetCampaignBody(camp2), defsub, trackdomain2, camp2.Tracktype)
 					Req2 := NewRequest(camp2.From_email, camp2.From_name, defsub.Email, camp2.Subject, parsed_html2, defsub.Message_id)
 					wg.Add(1)
 					go SMTPSend(&wg, Req2)
@@ -355,7 +355,7 @@ func MainLoop(camp Campaign) {
                                  trackdomain = tracka
                            }
                         }
-			parsed_html := GenerateCampaignTemplate(campaign, camp.Html, sub, trackdomain, camp.Tracktype)
+			parsed_html := GenerateCampaignTemplate(campaign, GetCampaignBody(camp), sub, trackdomain, camp.Tracktype)
 			Req := NewRequest(camp.From_email, camp.From_name, sub.Email, camp.Subject, parsed_html, sub.Message_id)
 			// autopause support
 			var avtopauzis int64 = 0
@@ -905,6 +905,15 @@ func getCampaign(uid string) (Campaign, error) {
 		fmt.Printf("GetCampaign took: %s\n", t2.Sub(t0))
 	}
 	return camp, err
+}
+
+// GetCampaignBody returns the email body content from a campaign.
+// For plain-text campaigns, Html is empty and content is in Plain field.
+func GetCampaignBody(camp Campaign) string {
+	if camp.Html != "" {
+		return camp.Html
+	}
+	return camp.Plain
 }
 
 func ReturnUrlPart(typeas string) string {
@@ -1947,6 +1956,7 @@ func SMTPSend(wg *sync.WaitGroup, req *Request) {
 				}
 				// Send the email.
 				d := gomail.NewPlainDialer(smtphost, validport, username, password)
+				d.LocalName = smtphost
 
 				// Display an error message if something goes wrong
 				if err := d.DialAndSend(m); err != nil {
@@ -1989,6 +1999,7 @@ func SMTPSend(wg *sync.WaitGroup, req *Request) {
 					}
 					// Send the email.
 					d := gomail.NewPlainDialer(smtphost, validport, username, password)
+					d.LocalName = smtphost
 
 					// Display an error message if something goes wrong
 					if err := d.DialAndSend(m); err != nil {
@@ -2308,7 +2319,9 @@ type Campaign struct {
 	Customer_id          string
 	Name                 string `json:"name"`
 	Subject              string
-	Html                 string
+	Html                 string `json:"html"`
+	Plain                string `json:"plain"`
+	Type                 string `json:"type"`
 	From_email           string
 	From_name            string
 	Trackurl             string

@@ -500,7 +500,7 @@ class SendingServerController extends Controller
         $customer = $request->user()->customer->id;
         $global_tracking = Setting::get('global_tracking');
         $all_servers = 0;
-        $servers = \Acelle\Model\SendingServer::getAll()->where('id','>',1)->get();
+        $servers = \Acelle\Model\SendingServer::getAll()->get();
         if ($uid == "all") $all_servers = 1;
         // Get current user
 //        $current_user = $request->user();
@@ -620,7 +620,7 @@ class SendingServerController extends Controller
                             MailLog::error("Unable to preprocess cloudflare record $random_dns.$domain");
                         }
                         $final_dns = "$random_dns.$domain";
-                        // pass request to change postfix config
+                        // pass request to change postfix config (optional - only works if minisvc is running)
                         try {
                             $ch = curl_init();
                             curl_setopt($ch, CURLOPT_URL, "http://$item->host:4591/chgdns");
@@ -628,10 +628,15 @@ class SendingServerController extends Controller
                             curl_setopt($ch, CURLOPT_POSTFIELDS,
                                 "auth_api=112233&ip=$item->host&dns=$final_dns&url=localhost");
                             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+                            curl_setopt($ch, CURLOPT_TIMEOUT, 5);
                             $server_output = curl_exec($ch);
+                            if ($server_output === false) {
+                                MailLog::info("Remote API not available on $item->host:4591 (minisvc not running), skipping postfix config update");
+                            }
                             curl_close($ch);
                         } catch (\Exception $ex) {
-                            MailLog::error("Unable to contact remote api for postfix server $item->hostname ($item->name)");
+                            MailLog::error("Unable to contact remote api for postfix server $item->host ($item->name)");
                         }
                         // change local record
                         $item->name = "$final_dns $item->host";

@@ -54,7 +54,7 @@ checked
 
 <div id="progressbar" style="display: none"><img src="/images/91.gif"> Working...</div>
 					 <div id="setup_block">
-										<input type="button" onclick="replace_input_pubkey()" value="pubkey auth"> @include('helpers.form_control', ['type' => 'text', 'name' => 'server', 'label' => 'Enter Server credentials in format username:password@ip:port', 'value' => $server->host ?? '', 'placeholder' => 'username:password@ip:port'])
+										<input type="button" onclick="replace_input_pubkey()" value="pubkey auth"> @include('helpers.form_control', ['type' => 'text', 'name' => 'server', 'label' => 'Enter Server credentials in format username:password@ip:port', 'value' => isset($server) ? ($server->host ?? '') : '', 'placeholder' => 'username:password@ip:port'])
 										<input type="hidden" name="check" value="1" />
                                          <input type="button" id="setup_proxy" onclick="setup_proxy()" value="Proxy setup...">
                                          </div>

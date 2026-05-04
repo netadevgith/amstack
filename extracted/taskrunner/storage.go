@@ -41,36 +41,25 @@ type UniversalStorageTracking struct {
 // 	Maillist   string `json:"maillist"`
 // }
 
-// 0 - opener, 1 - clicker 
-// function works fine but is deprecated and needs to be removed in the near future
+// 0 - opener, 1 - clicker
+// inserts tracking data into the openers table in the tracking database
 func SubmitTrackingas(tipas int, obj UniversalStorageTracking) bool {
 	db, err := sqlx.Connect("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/%s", TRACKINGAS_USER, TRACKINGAS_PASS, TRACKINGAS_HOST, 3306, TRACKINGAS_DB))
 		if err != nil {
 			loggers.debug.Printf("Got error then tried to contact to trackingas mysql server %s\n", err)
 			return false
 		}
-	query := ""	
-	params := ""
-	// opener
-    if tipas == 0 {
-		query = "INSERT INTO app_openai (email,ip_address,server_ip,server_ptr,user_agent,location,`when`,deployment,domain,campaign,maillist)"
-		params = fmt.Sprintf("%s','%s','%s','%s','%s','%s','%s','%s','%s','%s','%s",obj.Email,obj.Ip_address,obj.Server_ip,obj.Server_ptr,obj.User_agent,obj.Location,obj.Date_added,obj.Deployment,obj.Domain,obj.Campaign,obj.Maillist)
+		defer db.Close()
+	query := "INSERT INTO openers (email,ip_address,server_ip,server_ptr,user_agent,location,`when`,deployment,campaign,maillist)"
+	params := fmt.Sprintf("%s','%s','%s','%s','%s','%s','%s','%s','%s','%s",obj.Email,obj.Ip_address,obj.Server_ip,obj.Server_ptr,obj.User_agent,obj.Location,obj.Date_added,obj.Deployment,obj.Campaign,obj.Maillist)
+	sql := fmt.Sprintf("%s VALUES('%s')",query,params)
+	//log.Printf("Doing sql: %s\n",sql)
+	_, err = db.Exec(sql)
+	if err == nil {
+		return true
+	} else {
+		loggers.debug.Printf("SQL ERROR: %s\n",err)
 	}
-	// clicker
-	if tipas == 1 {
-		query = "INSERT INTO app_clickai (email,ip_address,user_agent,location,`when`,campaign)"
-		params = fmt.Sprintf("%s','%s','%s','%s','%s','%s",obj.Email,obj.Ip_address,obj.User_agent,obj.Location,obj.Date_added,obj.Campaign)
-	}	
-		sql := fmt.Sprintf("%s VALUES('%s')",query,params)
-		//log.Printf("Doing sql: %s\n",sql)
-		_, err = db.Exec(sql)
-		if err == nil {
-			//log.Printf("SQL OK")
-			return  true
-		} else {
-			loggers.debug.Printf("SQL ERROR: %s\n",err)
-		}
-		db.Close()
 	return false
 }
 
