@@ -151,7 +151,9 @@ chmod 600 /var/www/.ssh/id_rsa
 '
 
 # 6. Register platform as appliance (enables "Add to" buttons in UI)
-docker exec esp_app redis-cli -h 172.28.0.3 HSET appliances 'Platform' 'http://YOUR_PLATFORM_IP/api/v1/'
+# NOTE: trailing slash required, path is /api/ not /api/v1/
+# (matches Route::group prefix in app/Http/routes.php — see ApiController@postserver)
+docker exec esp_app redis-cli -h 172.28.0.3 HSET appliances 'Platform' 'https://YOUR_PLATFORM_HOST/api/'
 ```
 
 ### 2.10 Critical rule: NEVER enable Postfix on platform

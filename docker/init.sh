@@ -409,5 +409,18 @@ fi
 # Final permission fix (catches files created by init PHP commands)
 chown -R www-data:www-data /home/app/public_html/storage 2>/dev/null || true
 
+# Auto-register self as appliance for "Add to ..." UI button in /settings/servers.
+# Path is /api/ (NOT /api/v1/) — matches Route::group prefix in app/Http/routes.php.
+# Trailing slash required (controller concatenates: $deployment_url . "postserver").
+# Display name = ESP_APPLIANCE_NAME or hostname of APP_URL.
+APP_URL_FOR_API="${APP_URL:-http://localhost}"
+APPLIANCE_NAME="${ESP_APPLIANCE_NAME:-$(echo "$APP_URL_FOR_API" | sed -E 's|https?://||; s|/.*||')}"
+if [ -n "$APPLIANCE_NAME" ]; then
+    APPLIANCE_API_URL="${APP_URL_FOR_API%/}/api/"
+    redis-cli -h "${REDIS_HOST:-172.28.0.3}" -p "${REDIS_PORT:-6379}" \
+        HSET appliances "$APPLIANCE_NAME" "$APPLIANCE_API_URL" >/dev/null 2>&1 \
+        && echo "  Registered appliance '$APPLIANCE_NAME' -> $APPLIANCE_API_URL"
+fi
+
 # Start supervisor (nginx + php-fpm + queue workers)
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf

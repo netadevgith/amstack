@@ -1730,7 +1730,10 @@ elseif ($request->input('poststop') !== null)
             $deployment = $request->depl;
             if (\Redis::hexists('appliances',$deployment)) {
               $deployment_url = \Redis::hget('appliances',$deployment);
-                $ch = curl_init($deployment_url."postserver");
+                // Normalize URL: tolerate missing trailing slash. Path must be /api/ (see Route::group prefix).
+                $target_url = rtrim($deployment_url, '/') . '/postserver';
+                MailLog::info("inject_server(): POST to ".$target_url);
+                $ch = curl_init($target_url);
 
                 if ($request->pmta > 0) {
                     $post = [
@@ -1759,8 +1762,12 @@ elseif ($request->input('poststop') !== null)
                 curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
                 curl_setopt($ch, CURLOPT_POST, 1);
                 curl_setopt($ch, CURLOPT_POSTFIELDS, $post);
+                curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 30);
                 $response = curl_exec($ch);
-                MailLog::info("we got the response from the api: ".$response);
+                $curl_err = curl_error($ch);
+                $curl_http = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                MailLog::info("inject_server(): HTTP $curl_http, error='$curl_err', response: ".$response);
                 curl_close($ch);
 
                 // add server to the mta api
