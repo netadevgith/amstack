@@ -260,6 +260,34 @@ log_msg("INFO", "Step 3 completed: DNS records created");
 log_msg("INFO", "Step 4: Writing ip_addr file and creating postfix instances...");
 $ssh->system("cat > /root/ip_addr << 'IPEOF'\n${ip_addr_content}IPEOF");
 
+# 4b. Resolve platform IP (this host) so the mailer's mynetworks includes it.
+# Without this, generated postfix-N/main.cf has placeholder {PLATFORM_IP} and
+# Postfix rejects all relay attempts from the platform with 554 5.7.1.
+my $platform_ip = $ENV{PLATFORM_IP};
+if (!$platform_ip) {
+    # Try to resolve APP_URL host part (e.g. https://app.foo.com -> app.foo.com)
+    my $app_url = $ENV{APP_URL};
+    if ($app_url) {
+        my $host = $app_url;
+        $host =~ s{^https?://}{}i;
+        $host =~ s{[/:].*$}{};
+        my $packed = gethostbyname($host);
+        $platform_ip = inet_ntoa($packed) if $packed;
+    }
+}
+if (!$platform_ip) {
+    # Fall back to public IP of this host (the script runs inside esp_app container)
+    my $out_my_ip = `curl -s -m 5 https://api.ipify.org 2>/dev/null`;
+    chomp $out_my_ip if defined $out_my_ip;
+    $platform_ip = $out_my_ip if $out_my_ip && $out_my_ip =~ /^\d+\.\d+\.\d+\.\d+$/;
+}
+if ($platform_ip) {
+    log_msg("INFO", "Step 4b: Platform IP resolved to $platform_ip (used in mynetworks of each instance)");
+    $ssh->system("echo '$platform_ip' > /root/platform_ip");
+} else {
+    log_msg("WARN", "Step 4b: Could not resolve platform IP. Mailer instances will deny all relay attempts. Set PLATFORM_IP env var or APP_URL.");
+}
+
 # 5. Run multi script to create postfix instances
 log_msg("INFO", "Running /root/multi to create postfix instances (each instance is started individually)...");
 my $last = $ssh->system("/root/multi");

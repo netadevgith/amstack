@@ -9,6 +9,17 @@ use POSIX qw(strftime);
 
 my $scriptdir = dirname($0);
 my $filename = $scriptdir.'/ip_addr';
+# Platform IP — substituted into mynetworks of each instance so the platform
+# can relay through this mailer. Resolved (in priority order):
+#   1) $ENV{PLATFORM_IP}            — set by debian_multipostfix from APP_URL
+#   2) /root/platform_ip file       — written by debian_multipostfix before run
+#   3) default 127.0.0.1            — degraded mode; mailer only relays for self
+my $platform_ip = $ENV{PLATFORM_IP};
+if (!$platform_ip && -f '/root/platform_ip') {
+    open(my $fh, '<', '/root/platform_ip') or undef;
+    if ($fh) { $platform_ip = <$fh>; chomp $platform_ip if defined $platform_ip; close $fh; }
+}
+$platform_ip ||= '127.0.0.1';
 
 sub log_msg {
     my ($level, $msg) = @_;
@@ -63,6 +74,7 @@ my $data = read_file $scriptdir."/tpl/main.cf", {binmode => ':utf8'};
 $data =~ s/{NR}/$post_min/g;
 $data =~ s/{IP}/$ip/g;
 $data =~ s/{DNS}/$reverse/g;
+$data =~ s/{PLATFORM_IP}/$platform_ip/g;
 write_file "/etc/postfix-$post_min/main.cf", {binmode => ':utf8'}, $data;
 log_msg("INFO", "Enabling and starting postfix-$post_min...");
 system("postmulti -i postfix-$post_min -e enable");

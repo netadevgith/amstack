@@ -125,6 +125,21 @@ log_msg("INFO", "Injecting postfix config with IP: $ipas, hostname: $hostname");
 # replace placeholders with actual values
 my $out5 = $ssh->system("sed -i 's/SITASHOSTAS/$ipas/' /etc/postfix/main.cf");
 my $out6 = $ssh->system("sed -i 's/BANERIS/$hostname/' /etc/postfix/main.cf");
+
+# Resolve and substitute platform IP (env PLATFORM_IP or APP_URL host).
+# Without this, mynetworks contains literal {PLATFORM_IP} and Postfix rejects
+# all relay attempts from the platform with 554 5.7.1 Relay access denied.
+my $platform_ip = $ENV{PLATFORM_IP};
+if (!$platform_ip && $ENV{APP_URL}) {
+    my $host = $ENV{APP_URL};
+    $host =~ s{^https?://}{}i;
+    $host =~ s{[/:].*$}{};
+    my $packed = gethostbyname($host);
+    $platform_ip = inet_ntoa($packed) if $packed;
+}
+$platform_ip ||= '127.0.0.1';
+log_msg("INFO", "Substituting platform IP: $platform_ip");
+my $out7 = $ssh->system("sed -i 's/{PLATFORM_IP}/$platform_ip/g' /etc/postfix/main.cf");
 }
 }
 log_msg("INFO", "Step 4 completed: found $count IP(s)");
