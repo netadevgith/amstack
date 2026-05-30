@@ -20,10 +20,20 @@ my $force_install = 0;
 
 my $ua  = Mojo::UserAgent->new;
 
-# Cloudflare API settings from environment
-my $cf_email = $ENV{CLOUDFLARE_EMAIL} // '';
+# Cloudflare API settings from environment.
+# Supports two auth modes (in priority order):
+#   1) CLOUDFLARE_API_TOKEN (scoped token, "cfut_..." or "X..._...") -> Bearer auth
+#   2) CLOUDFLARE_EMAIL + CLOUDFLARE_APIKEY (Global API Key)         -> X-Auth-Email/Key
+# Falls back to (2) when (1) is empty. If CLOUDFLARE_APIKEY looks like a
+# scoped token (starts with "cfut_" or longer than 40 chars), it is also
+# accepted as Bearer to ease migration without renaming env vars.
+my $cf_token  = $ENV{CLOUDFLARE_API_TOKEN} // '';
+my $cf_email  = $ENV{CLOUDFLARE_EMAIL} // '';
 my $cf_apikey = $ENV{CLOUDFLARE_APIKEY} // '';
-my $cf_api = 'https://api.cloudflare.com/client/v4';
+my $cf_api    = 'https://api.cloudflare.com/client/v4';
+if (!$cf_token && $cf_apikey && ($cf_apikey =~ /^cfut_/ || length($cf_apikey) > 40)) {
+    $cf_token = $cf_apikey;
+}
 
 sub log_msg {
     my ($level, $msg) = @_;
@@ -34,10 +44,16 @@ sub log_msg {
 }
 
 sub cf_headers {
+    if ($cf_token) {
+        return {
+            'Authorization' => "Bearer $cf_token",
+            'Content-Type'  => 'application/json',
+        };
+    }
     return {
         'X-Auth-Email' => $cf_email,
-        'X-Auth-Key' => $cf_apikey,
-        'Content-Type' => 'application/json'
+        'X-Auth-Key'   => $cf_apikey,
+        'Content-Type' => 'application/json',
     };
 }
 
