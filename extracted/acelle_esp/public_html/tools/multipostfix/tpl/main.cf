@@ -1,7 +1,7 @@
 data_directory = /var/lib/postfix-{NR}
 queue_directory = /var/spool/postfix-{NR}
 multi_instance_name = postfix-{NR}
-inet_protocols = ipv4
+inet_protocols = all
 inet_interfaces = {IP}
 myhostname = {DNS}
 #compatibility_level = 2
@@ -32,8 +32,11 @@ smtpd_banner = $myhostname ESMTP $mail_name (Debian/GNU)
 smtpd_relay_restrictions = permit_mynetworks reject_unauth_destination
 multi_instance_enable = yes
 ## OPTIMIZE
-# messages in the deferred queue are returned to the sender with an undelivered notice
-maximal_queue_lifetime = 5s
+# messages in the deferred queue are returned to the sender with an undelivered notice.
+# 5s was far too aggressive (any greylist/transient defer = instant bounce); 1h allows
+# a few retries via minimal_backoff_time while not holding a large backlog.
+maximal_queue_lifetime = 1h
+bounce_queue_lifetime = 1h
 # determines the time between deferred queue scans by the queue manager. The default is 1,000 seconds
 queue_run_delay=1000s
 # determines the minimal time between attempts to deliver a deferred message

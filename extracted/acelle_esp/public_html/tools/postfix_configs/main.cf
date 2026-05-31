@@ -23,7 +23,7 @@ relayhost =
 mynetworks = 127.0.0.0/8 {PLATFORM_IP}
 mailbox_size_limit = 0
 recipient_delimiter = +
-inet_protocols = ipv4
+inet_protocols = all
 inet_interfaces = SITASHOSTAS
 
 smtp_destination_concurrency_limit = 500
