@@ -1945,7 +1945,7 @@ return true;
                     ->join('campaigns_lists_segments','campaigns.id','=','campaigns_lists_segments.campaign_id')
                     ->join('mail_lists','campaigns_lists_segments.mail_list_id','=','mail_lists.id')->where('mail_lists.id',$this->defaultMailList->id)->first()->all_sending_servers == 1) {
                 $servers = \DB::table('sending_servers')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port','smtp_protocol','smtp_username','smtp_password')
-                    ->where('status', 'active')->where('sending_servers.id','>', 1)->get();
+                    ->where('status', 'active')->get();
                 MailLog::info("all servers assigend");
             } else {
                 $servers = \DB::table('campaigns')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port', 'fitness','smtp_protocol','smtp_username','smtp_password')
@@ -2100,7 +2100,7 @@ return true;
                         ->join('campaigns_lists_segments', 'campaigns.id', '=', 'campaigns_lists_segments.campaign_id')
                         ->join('mail_lists', 'campaigns_lists_segments.mail_list_id', '=', 'mail_lists.id')->where('mail_lists.id', $this->defaultMailList->id)->first()->all_sending_servers == 1) {
                     $servers = \DB::table('sending_servers')->select('sending_servers.uid', 'sending_servers.type', 'host', 'aws_access_key_id', 'aws_secret_access_key', 'aws_region', 'api_key', 'smtp_port', 'smtp_protocol', 'smtp_username', 'smtp_password')
-                        ->where('status', 'active')->where('sending_servers.id', '>', 1)->get();
+                        ->where('status', 'active')->get();
                     MailLog::info("all servers assigend");
                 } else {
                     $servers = \DB::table('campaigns')->select('sending_servers.uid', 'sending_servers.type', 'host', 'aws_access_key_id', 'aws_secret_access_key', 'aws_region', 'api_key', 'smtp_port', 'fitness', 'smtp_protocol', 'smtp_username', 'smtp_password')
@@ -2212,7 +2212,7 @@ return true;
                     ->join('campaigns_lists_segments','campaigns.id','=','campaigns_lists_segments.campaign_id')
                     ->join('mail_lists','campaigns_lists_segments.mail_list_id','=','mail_lists.id')->where('mail_lists.id',$this->defaultMailList->id)->first()->all_sending_servers == 1) {
                 $servers = \DB::table('sending_servers')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port','smtp_protocol','smtp_username','smtp_password')
-                    ->where('status', 'active')->where('sending_servers.id','>', 1)->get();
+                    ->where('status', 'active')->get();
                 MailLog::info("all servers assigend");
             } else {
                 $servers = \DB::table('campaigns')->select('sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port', 'fitness','smtp_protocol','smtp_username','smtp_password')
@@ -2323,7 +2323,7 @@ return [
                     ->join('campaigns_lists_segments','campaigns.id','=','campaigns_lists_segments.campaign_id')
                     ->join('mail_lists','campaigns_lists_segments.mail_list_id','=','mail_lists.id')->where('mail_lists.id',$this->defaultMailList->id)->first()->all_sending_servers == 1) {
                 $servers = \DB::table('sending_servers')->select('sending_servers.uid','sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port','smtp_protocol','smtp_username','smtp_password')
-                    ->where('status', 'active')->where('sending_servers.id','>', 1)->get();
+                    ->where('status', 'active')->get();
                 MailLog::info("all servers assigend");
             } else {
                 $servers = \DB::table('campaigns')->select('sending_servers.uid','sending_servers.type','host','aws_access_key_id','aws_secret_access_key','aws_region','api_key', 'smtp_port', 'fitness','smtp_protocol','smtp_username','smtp_password')
