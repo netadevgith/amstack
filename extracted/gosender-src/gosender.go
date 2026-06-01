@@ -1957,7 +1957,7 @@ func SMTPSend(wg *sync.WaitGroup, req *Request) {
 				// Send the email.
 				d := gomail.NewPlainDialer(smtphost, validport, username, password)
 				d.LocalName = smtphost
-
+				d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 				// Display an error message if something goes wrong
 				if err := d.DialAndSend(m); err != nil {
 					fmt.Printf("%: %s!\n", color.FgRed.Render("Sent Error"), err)
@@ -2000,7 +2000,7 @@ func SMTPSend(wg *sync.WaitGroup, req *Request) {
 					// Send the email.
 					d := gomail.NewPlainDialer(smtphost, validport, username, password)
 					d.LocalName = smtphost
-
+					d.TLSConfig = &tls.Config{InsecureSkipVerify: true}
 					// Display an error message if something goes wrong
 					if err := d.DialAndSend(m); err != nil {
 						fmt.Printf("%s: %s!ahac\n", color.FgRed.Render("Sent Error"), err)
