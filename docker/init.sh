@@ -250,10 +250,16 @@ echo "  Building gosender..."
 cd /home/app
 go mod tidy 2>/dev/null || true
 go build -ldflags "-w -s -X main.LICENSING=no" -o gosender ./gosender-src/ || echo "  Warning: gosender build had issues"
-# Wrapper scripts for gosender — it needs CWD=/home/app for names.txt and .env
-# PHP exec() calls ./gosender from /home/app/public_html (start)
-# and $HOME/gosender from queue worker (RestartBackroundProcesses)
-for WRAPPER_PATH in /root/gosender /home/app/public_html/gosender; do
+# Wrapper scripts for gosender — it needs CWD=/home/app for names.txt and .env.
+# PHP exec() calls ./gosender from /home/app/public_html (start),
+# $HOME/gosender from the queue worker (RestartBackroundProcesses, HOME=/root),
+# and $HOME/gosender from php-fpm / test-email buttons (HOME=/var/www).
+# Without the /var/www wrapper, the www-data path resolves to the raw binary
+# with CWD=/home/app/public_html and HOME=/var/www, so gosender panics on
+# "open /var/www/names.txt: no such file" and no test email is ever sent.
+mkdir -p /var/www
+for WRAPPER_PATH in /root/gosender /home/app/public_html/gosender /var/www/gosender; do
+    rm -f "$WRAPPER_PATH"
     cat > "$WRAPPER_PATH" << 'GWRAPPER'
 #!/bin/bash
 cd /home/app

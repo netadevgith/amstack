@@ -755,6 +755,56 @@ func DetectTrackingDomain(campaign Campaign, subscriber Subscriber) string {
 	return trackurl
 }
 
+// insecureSendMail mirrors net/smtp.SendMail but skips TLS certificate
+// verification on STARTTLS. Mailers commonly present a self-signed / snakeoil
+// cert (local Postfix on 127.0.0.1, freshly-installed relays); the stdlib
+// smtp.SendMail aborts on those with "x509: cannot validate certificate".
+// This path is reached for non-SSL SMTP servers (the gomail dialer path was
+// already patched with InsecureSkipVerify, but the smtp.SendMail fallbacks
+// were not — causing test emails / sends to silently fail).
+func insecureSendMail(addr string, a smtp.Auth, from string, to []string, msg []byte) error {
+	c, err := smtp.Dial(addr)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	host, _, _ := net.SplitHostPort(addr)
+	if err = c.Hello(host); err != nil {
+		return err
+	}
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err = c.StartTLS(&tls.Config{ServerName: host, InsecureSkipVerify: true}); err != nil {
+			return err
+		}
+	}
+	if a != nil {
+		if ok, _ := c.Extension("AUTH"); ok {
+			if err = c.Auth(a); err != nil {
+				return err
+			}
+		}
+	}
+	if err = c.Mail(from); err != nil {
+		return err
+	}
+	for _, rcpt := range to {
+		if err = c.Rcpt(rcpt); err != nil {
+			return err
+		}
+	}
+	w, err := c.Data()
+	if err != nil {
+		return err
+	}
+	if _, err = w.Write(msg); err != nil {
+		return err
+	}
+	if err = w.Close(); err != nil {
+		return err
+	}
+	return c.Quit()
+}
+
 // GetRandomSubscriber - Gets random subscriber from the campaign queue list sitting on redis backend
 func GetRandomSubscriber(uid string, tip bool, wg *sync.WaitGroup) (Subscriber, error) {
 	t0 := time.Now()
@@ -2021,7 +2071,7 @@ func SMTPSend(wg *sync.WaitGroup, req *Request) {
 
 				} else {
 					auth = smtp.PlainAuth("", username, password, smtphost)
-					err := smtp.SendMail(smtphost+":"+smtpport, auth, from.Address, []string{to.Address}, []byte(message)) //[]byte("This is the email body."),
+					err := insecureSendMail(smtphost+":"+smtpport, auth, from.Address, []string{to.Address}, []byte(message)) //[]byte("This is the email body."),
 					if err != nil {
 						//ProgramPanic(err)
 						// avoid program crashing here
@@ -2036,7 +2086,7 @@ func SMTPSend(wg *sync.WaitGroup, req *Request) {
 				}
 			}
 		} else {
-			err := smtp.SendMail(smtphost+":"+smtpport, nil, from.Address, []string{to.Address}, []byte(message)) //[]byte("This is the email body.")
+			err := insecureSendMail(smtphost+":"+smtpport, nil, from.Address, []string{to.Address}, []byte(message)) //[]byte("This is the email body.")
 			if err != nil {
 				//ProgramPanic(err)
 				// avoid program crashing here

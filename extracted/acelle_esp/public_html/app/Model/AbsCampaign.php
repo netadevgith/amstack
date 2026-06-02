@@ -2143,12 +2143,12 @@ return true;
                         $servas->initializeSns($message);
                         MailLog::info("Restarting amazon-api sender service...");
                         MailLog::info("\$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->aws_access_key_id --secretkey $serv->aws_secret_access_key --region $serv->aws_region --smtpspeed $speed --test --nodone");
-                        exec("\$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->aws_access_key_id --secretkey $serv->aws_secret_access_key --region $serv->aws_region --smtpspeed $speed --test --nodone > /dev/null 2>&1 &");
+                        exec("setsid \$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->aws_access_key_id --secretkey $serv->aws_secret_access_key --region $serv->aws_region --smtpspeed $speed --test --nodone < /dev/null > /dev/null 2>&1 &");
                         break;
                     case "sendgrid-api":
                         MailLog::info("Restarting sendgrid-api sender service $serv->api_key for campaign $this->uid");
                         MailLog::info("\$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->api_key --smtpspeed $speed --test --nodone > /dev/null 2>&1 &");
-                        exec("\$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->api_key --smtpspeed $speed --test --nodone > /dev/null 2>&1 &");
+                        exec("setsid \$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->api_key --smtpspeed $speed --test --nodone < /dev/null > /dev/null 2>&1 &");
                         break;
                 }
             }
@@ -2250,7 +2250,7 @@ return true;
                         break;
                     case "sendgrid-api":
                         MailLog::info("Restarting sendgrid-api sender service $serv->api_key for campaign $this->uid");
-                        exec("\$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->api_key --smtpspeed $serv->fitness --test --nodone > /dev/null 2>&1 &");
+                        exec("setsid \$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->api_key --smtpspeed $serv->fitness --test --nodone < /dev/null > /dev/null 2>&1 &");
                         break;
                 }
                 if ($use_sleep > 0) usleep($sleep_timeout);
@@ -2344,7 +2344,11 @@ return [
                 switch ($serv->type) {
                     case "smtp":
                         MailLog::info("./gosender --send --campuid $this->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness --username $serv->smtp_username --password $serv->smtp_password $ssl --test --nodone");
-                        exec("\$HOME/gosender --send --campuid $this->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness --username $serv->smtp_username --password $serv->smtp_password $ssl --test --nodone > /dev/null 2>&1 &");
+                        // setsid + </dev/null detaches gosender into its own session so it
+                        // survives php-fpm finishing the request. Without it, the backgrounded
+                        // child is killed before it pops the test subscriber from Redis, so no
+                        // test email is ever delivered (the subscriber is left stuck in the set).
+                        exec("setsid \$HOME/gosender --send --campuid $this->uid --smtphost $serv->host --smtpport $serv->smtp_port --smtpspeed $serv->fitness --username $serv->smtp_username --password $serv->smtp_password $ssl --test --nodone < /dev/null > /dev/null 2>&1 &");
                         break;
                     case "amazon-api":
                         // we should setup SNS handlers here :|
@@ -2356,12 +2360,12 @@ return [
 
                         MailLog::info("Restarting amazon-api sender service...");
                         MailLog::info("\$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->aws_access_key_id --secretkey $serv->aws_secret_access_key --region $serv->aws_region --smtpspeed $serv->fitness --test --nodone");
-                        exec("\$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->aws_access_key_id --secretkey $serv->aws_secret_access_key --region $serv->aws_region --smtpspeed $serv->fitness --test --nodone > /dev/null 2>&1 &");
+                        exec("setsid \$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->aws_access_key_id --secretkey $serv->aws_secret_access_key --region $serv->aws_region --smtpspeed $serv->fitness --test --nodone < /dev/null > /dev/null 2>&1 &");
                         break;
                     case "sendgrid-api":
                         MailLog::info("Restarting sendgrid-api sender service $serv->api_key for campaign $this->uid");
                         MailLog::info("\$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->api_key --smtpspeed $serv->fitness --test --nodone > /dev/null 2>&1 &");
-                        exec("\$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->api_key --smtpspeed $serv->fitness --test --nodone > /dev/null 2>&1 &");
+                        exec("setsid \$HOME/gosender --send --campuid $this->uid --type $serv->type --accesskey $serv->api_key --smtpspeed $serv->fitness --test --nodone < /dev/null > /dev/null 2>&1 &");
                         break;
                 }
             }
@@ -2469,9 +2473,15 @@ return [
      */
     public function createStdClassSubscriber($subscriber)
     {
-        // default attributes that are required
+        // default attributes that are required.
+        // mail_list_id is REQUIRED by gosender — its Subscriber struct declares
+        // `Mail_list_id int json:",string"`, so the JSON value must be a quoted
+        // string. Without this field the test subscriber is silently dropped and
+        // no test email is ever delivered (all 4 test/simulation methods are
+        // affected, since they all build their subscriber through here).
         $jsonObj = [
-            'uid' => uniqid()
+            'uid' => uniqid(),
+            'mail_list_id' => (string) ($this->defaultMailList ? $this->defaultMailList->id : 0),
         ];
 
         // append the customer specified attributes and build a stdClass object
