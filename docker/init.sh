@@ -348,6 +348,44 @@ service rsyslog start 2>/dev/null || true
 service postfix start 2>/dev/null || postfix start 2>/dev/null || true
 echo "  Postfix started (ports 25, 2525)."
 
+# ---- OpenDKIM signing + emstr6.nl bounce-sink ----
+# /etc/opendkim and /etc/postfix are NOT on a Docker volume, so a full container
+# recreate would otherwise lose the DKIM keys (emstr6.nl, parkagency.org) and the
+# bounce-sink. We keep a backup in the app_storage volume and restore it on boot.
+# To refresh the backup after changing keys/config, on the live container run:
+#   tar czf storage/mailconfig/opendkim.tar.gz -C / etc/opendkim etc/opendkim.conf
+echo "  Configuring OpenDKIM signing..."
+MAILCFG=/home/app/public_html/storage/mailconfig
+if [ -f "$MAILCFG/opendkim.tar.gz" ]; then
+    tar xzf "$MAILCFG/opendkim.tar.gz" -C / 2>/dev/null
+    chown -R opendkim:opendkim /etc/opendkim/keys 2>/dev/null
+    find /etc/opendkim/keys -name '*.private' -exec chmod 600 {} \; 2>/dev/null
+    echo "    DKIM keys/tables restored from storage volume."
+fi
+# Trust localhost + the Docker subnet so gosender's outbound mail is SIGNED (not just verified).
+for H in 127.0.0.1 ::1 localhost 172.28.0.0/16; do
+    grep -qxF "$H" /etc/opendkim/TrustedHosts 2>/dev/null || echo "$H" >> /etc/opendkim/TrustedHosts
+done
+postconf -e "milter_default_action = accept"
+postconf -e "smtpd_milters = inet:localhost:8891"
+postconf -e "non_smtpd_milters = inet:localhost:8891"
+pkill -9 opendkim 2>/dev/null; sleep 1
+rm -f /var/run/opendkim/opendkim.pid 2>/dev/null
+service opendkim start 2>/dev/null || true
+
+# emstr6.nl is a sending-only domain with no real mailbox; accept + discard its
+# bounces so undeliverable MAILER-DAEMON DSNs don't pile up timing out for days.
+if [ -f "$MAILCFG/transport" ]; then
+    cp -a "$MAILCFG/transport" /etc/postfix/transport
+else
+    grep -q "^emstr6.nl" /etc/postfix/transport 2>/dev/null || echo "emstr6.nl  discard:bounce-sink" >> /etc/postfix/transport
+fi
+postmap /etc/postfix/transport 2>/dev/null
+postconf -e "transport_maps = hash:/etc/postfix/transport"
+postconf -e "relay_domains = emstr6.nl"
+postfix reload 2>/dev/null || true
+echo "  OpenDKIM + bounce-sink configured."
+
 # Redis proxy already started earlier (after Redis readiness check)
 
 # ---- Start background services (worker instances only) ----
