@@ -314,14 +314,31 @@ echo "  Cron jobs configured."
 
 # ---- Configure and start Postfix ----
 echo "  Configuring Postfix..."
-postconf -e "myhostname = localhost"
-postconf -e "mydomain = localhost"
+# Derive a real FQDN for HELO from APP_URL so it matches the host's PTR/rDNS.
+# A localhost HELO is rejected by Gmail/Outlook and tanks deliverability.
+MAIL_HOSTNAME=$(echo "${APP_URL:-http://localhost}" | sed -E 's|https?://||; s|/.*||; s|:.*||')
+[ -z "$MAIL_HOSTNAME" ] && MAIL_HOSTNAME=localhost
+# Parent domain = strip the leftmost label only when there are 3+ labels (sub.domain.tld)
+if [ "$(echo "$MAIL_HOSTNAME" | tr -cd '.' | wc -c)" -ge 2 ]; then
+    MAIL_DOMAIN=$(echo "$MAIL_HOSTNAME" | sed -E 's|^[^.]+\.||')
+else
+    MAIL_DOMAIN="$MAIL_HOSTNAME"
+fi
+postconf -e "myhostname = $MAIL_HOSTNAME"
+postconf -e "mydomain = $MAIL_DOMAIN"
 postconf -e "myorigin = localhost"
 postconf -e "inet_interfaces = all"
 postconf -e "inet_protocols = ipv4"
 postconf -e "mydestination = localhost"
 postconf -e "mynetworks = 127.0.0.0/8 172.28.0.0/16"
 postconf -e "smtpd_recipient_restrictions = permit_mynetworks, reject_unauth_destination"
+postconf -e "smtp_helo_name = $MAIL_HOSTNAME"
+# Opportunistic TLS both directions (snakeoil cert is fine; gosender uses InsecureSkipVerify).
+# Without this, all mail is plaintext, which hurts deliverability and reputation.
+postconf -e "smtp_tls_security_level = may"
+postconf -e "smtpd_tls_security_level = may"
+postconf -e "smtp_tls_loglevel = 1"
+postconf -e "smtp_tls_note_starttls_offer = yes"
 # Listen on port 2525 (gosender default) in addition to 25
 if ! grep -q "^2525" /etc/postfix/master.cf 2>/dev/null; then
     echo "2525      inet  n       -       y       -       -       smtpd" >> /etc/postfix/master.cf
